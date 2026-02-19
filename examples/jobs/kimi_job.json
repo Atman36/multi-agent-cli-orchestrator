@@ -1,0 +1,20 @@
+{
+  "schema_version": "1.0",
+  "job_id": "kimi_simulation_job",
+  "created_at": "2026-02-18T12:00:00Z",
+  "goal": "Demonstrate Kimi worker simulation",
+  "workdir": "/Users/Apple/.openclaw/workspace/orchestrator",
+  "steps": [
+    {
+      "step_id": "01_hello",
+      "agent": "kimi",
+      "role": "assistant",
+      "prompt": "Say hello and explain what you can do."
+    }
+  ],
+  "policy": {
+    "sandbox": false,
+    "network": "allow",
+    "allowed_binaries": []
+  }
+}
