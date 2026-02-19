@@ -19,6 +19,7 @@ from orchestrator.models import JobSpec, JobResult, StepResult, ArtifactPaths, E
 from orchestrator.policy import build_policy_from_env, PolicyError
 from orchestrator.preflight import assert_real_cli_ready, PreflightError
 from orchestrator.retention import run_retention
+from orchestrator.step_requirements import required_binaries_for_job
 from orchestrator.validation import validate_result_contract
 from orchestrator.validator import validate_json, SchemaValidationError
 from orchestrator.workspace import WorkspaceManager, WorkspaceError
@@ -201,14 +202,6 @@ async def run_forever_async() -> None:
         sandbox_wrapper_args=settings.sandbox_wrapper_args,
         network_policy=settings.network_policy,
     )
-    if settings.enable_real_cli:
-        versions = assert_real_cli_ready(
-            allowed_binaries=settings.allowed_binaries,
-            min_binary_versions=settings.min_binary_versions,
-            required_binaries=["opencode", "codex", "claude", "git"],
-        )
-        if versions:
-            log.info("Real CLI preflight versions: %s", versions)
 
     log.info("Runner started. enable_real_cli=%s sandbox=%s", settings.enable_real_cli, settings.sandbox)
     if policy.network_policy == "deny" and (not policy.sandbox or not policy.sandbox_wrapper):
@@ -305,6 +298,18 @@ async def run_forever_async() -> None:
                 except PolicyError as e:
                     overall_status = "failed"
                     overall_error = ErrorInfo(code="policy", message=str(e))
+            if settings.enable_real_cli and overall_error is None:
+                try:
+                    versions = assert_real_cli_ready(
+                        allowed_binaries=job_policy.allowed_binaries,
+                        min_binary_versions=settings.min_binary_versions,
+                        required_binaries=sorted(required_binaries_for_job(job)),
+                    )
+                    if versions:
+                        log.info("Real CLI preflight versions for job %s: %s", job.job_id, versions)
+                except PreflightError as e:
+                    overall_status = "failed"
+                    overall_error = ErrorInfo(code="preflight", message=str(e))
 
             step_idx = 0
             while step_idx < len(job.steps):
@@ -353,6 +358,7 @@ async def run_forever_async() -> None:
                         max_input_artifacts_files=settings.max_input_artifacts_files,
                         max_input_artifact_chars=settings.max_input_artifact_chars,
                         max_input_artifacts_chars=settings.max_input_artifacts_chars,
+                        max_subprocess_output_chars=settings.max_subprocess_output_chars,
                         idle_watchdog_sec=settings.runner_max_idle_sec,
                         non_git_workdir_status=settings.non_git_workdir_status,
                         context_window=list(context_window),

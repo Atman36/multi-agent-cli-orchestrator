@@ -24,17 +24,49 @@ class CommandResult:
     stderr: str
     duration_ms: int
     killed_by_watchdog: bool = False
+    stdout_truncated: bool = False
+    stderr_truncated: bool = False
 
 
-async def _read_stream(stream: asyncio.StreamReader, sink: list[str], on_line=None):
+async def _read_stream(
+    stream: asyncio.StreamReader,
+    sink: list[str],
+    *,
+    on_line=None,
+    max_chars: int | None = None,
+) -> bool:
+    used_chars = 0
+    truncated = False
+
     while True:
         line = await stream.readline()
         if not line:
             break
         text = line.decode(errors="replace")
-        sink.append(text)
+
+        if max_chars is None:
+            sink.append(text)
+        elif max_chars == 0:
+            truncated = truncated or bool(text)
+        elif used_chars < max_chars:
+            remaining = max_chars - used_chars
+            if len(text) <= remaining:
+                sink.append(text)
+                used_chars += len(text)
+            else:
+                sink.append(text[:remaining])
+                used_chars = max_chars
+                truncated = True
+        else:
+            truncated = True
+
         if on_line:
             on_line(text)
+
+    if truncated and max_chars is not None:
+        sink.append(f"\n[truncated: output exceeded {max_chars} chars]\n")
+
+    return truncated
 
 
 async def _terminate_process_group(proc: asyncio.subprocess.Process, *, grace_sec: int = 2) -> None:
@@ -71,6 +103,7 @@ async def run_command(
     clear_env: bool = False,
     timeout_sec: int,
     idle_timeout_sec: int | None = None,
+    max_output_chars: int | None = 200000,
     log_file: Path | None = None,
 ) -> CommandResult:
     """Run a subprocess with hard timeout + optional idle watchdog.
@@ -127,8 +160,13 @@ async def run_command(
             with log_file.open("a", encoding="utf-8") as f:
                 f.write(_line)
 
-    t_out = asyncio.create_task(_read_stream(proc.stdout, stdout_lines, on_line=_touch))  # type: ignore[arg-type]
-    t_err = asyncio.create_task(_read_stream(proc.stderr, stderr_lines, on_line=_touch))  # type: ignore[arg-type]
+    normalized_output_limit = None if max_output_chars is None else max(0, max_output_chars)
+    t_out = asyncio.create_task(  # type: ignore[arg-type]
+        _read_stream(proc.stdout, stdout_lines, on_line=_touch, max_chars=normalized_output_limit)
+    )
+    t_err = asyncio.create_task(  # type: ignore[arg-type]
+        _read_stream(proc.stderr, stderr_lines, on_line=_touch, max_chars=normalized_output_limit)
+    )
 
     async def _watchdog():
         nonlocal killed_by_watchdog
@@ -148,15 +186,18 @@ async def run_command(
     except asyncio.TimeoutError:
         await _terminate_process_group(proc, grace_sec=2)
 
-    await t_out
-    await t_err
+    stdout_truncated = await t_out
+    stderr_truncated = await t_err
     wd.cancel()
 
     duration_ms = int((time.time() - start) * 1000)
+    exit_code = proc.returncode if proc.returncode is not None else -1
     return CommandResult(
-        exit_code=int(proc.returncode or 0),
+        exit_code=exit_code,
         stdout="".join(stdout_lines),
         stderr="".join(stderr_lines),
         duration_ms=duration_ms,
         killed_by_watchdog=killed_by_watchdog,
+        stdout_truncated=stdout_truncated,
+        stderr_truncated=stderr_truncated,
     )

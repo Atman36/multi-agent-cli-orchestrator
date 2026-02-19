@@ -38,6 +38,7 @@ class StepContext:
     max_input_artifacts_files: int
     max_input_artifact_chars: int
     max_input_artifacts_chars: int
+    max_subprocess_output_chars: int = 200000
     idle_watchdog_sec: int | None = None
     non_git_workdir_status: str = "needs_human"
     context_window: list[dict[str, Any]] = field(default_factory=list)
@@ -50,6 +51,10 @@ class WorkerError(RuntimeError):
 
 class BaseWorker:
     AGENT_NAME: str = "base"
+
+    def required_binaries(self, step: StepSpec) -> set[str]:
+        """Return binaries required for this step in real CLI mode."""
+        return set()
 
     async def run(self, ctx: StepContext) -> StepResult:
         """Execute a step and return a StepResult.

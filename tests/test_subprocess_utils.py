@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import asyncio
 import os
+import sys
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -65,6 +67,63 @@ class SubprocessEnvTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("PATH", env_out)
         self.assertNotIn("HOME", env_out)
         self.assertNotIn("TMPDIR", env_out)
+
+    async def test_output_is_truncated_when_limit_is_reached(self) -> None:
+        result = await run_command(
+            [sys.executable, "-c", "import sys; sys.stdout.write('A'*120); sys.stderr.write('B'*120)"],
+            cwd=_repo_root(),
+            env={},
+            env_allowlist=[],
+            clear_env=False,
+            timeout_sec=5,
+            max_output_chars=50,
+        )
+
+        self.assertEqual(result.exit_code, 0)
+        self.assertTrue(result.stdout_truncated)
+        self.assertTrue(result.stderr_truncated)
+        self.assertIn("A" * 50, result.stdout)
+        self.assertIn("B" * 50, result.stderr)
+        self.assertIn("[truncated: output exceeded 50 chars]", result.stdout)
+        self.assertIn("[truncated: output exceeded 50 chars]", result.stderr)
+
+    async def test_returncode_none_maps_to_negative_one(self) -> None:
+        def _stream(data: bytes) -> asyncio.StreamReader:
+            stream = asyncio.StreamReader()
+            stream.feed_data(data)
+            stream.feed_eof()
+            return stream
+
+        class _FakeProc:
+            def __init__(self) -> None:
+                self.returncode = None
+                self.pid = os.getpid()
+                self.stdout = _stream(b"hello\n")
+                self.stderr = _stream(b"")
+
+            async def wait(self) -> int:
+                return 0
+
+            def send_signal(self, _sig: int) -> None:
+                return None
+
+            def kill(self) -> None:
+                return None
+
+        async def _fake_create_subprocess_exec(*_args, **_kwargs) -> _FakeProc:
+            return _FakeProc()
+
+        with patch("orchestrator.subprocess_utils.asyncio.create_subprocess_exec", side_effect=_fake_create_subprocess_exec):
+            result = await run_command(
+                ["/usr/bin/env"],
+                cwd=_repo_root(),
+                env={},
+                env_allowlist=[],
+                clear_env=False,
+                timeout_sec=5,
+            )
+        self.assertEqual(result.exit_code, -1)
+        self.assertEqual(result.stdout, "hello\n")
 
 
 if __name__ == "__main__":

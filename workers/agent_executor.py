@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
-from orchestrator.models import ErrorInfo, Metrics, StepResult
+from orchestrator.models import ErrorInfo, Metrics, StepResult, StepSpec
 from orchestrator.subprocess_utils import CommandResult, run_command
 from workers.base import BaseWorker, StepContext
 
@@ -21,6 +21,9 @@ class ParsedOutput:
 
 
 class AgentExecutor(BaseWorker):
+    def required_binaries(self, step: StepSpec) -> set[str]:
+        return {step.agent, "git"}
+
     def build_cmd(self, ctx: StepContext, full_prompt: str) -> list[str]:
         raise NotImplementedError
 
@@ -77,6 +80,7 @@ class AgentExecutor(BaseWorker):
             clear_env=ctx.sandbox_clear_env,
             timeout_sec=ctx.step.timeout_sec,
             idle_timeout_sec=ctx.idle_watchdog_sec,
+            max_output_chars=ctx.max_subprocess_output_chars,
             log_file=None,
         )
         finished_at = utc_now_iso()

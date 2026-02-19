@@ -107,6 +107,7 @@ class Settings:
     max_input_artifacts_files: int
     max_input_artifact_chars: int
     max_input_artifacts_chars: int
+    max_subprocess_output_chars: int
     max_webhook_body_bytes: int
     max_daily_api_calls: int
     max_daily_cost_usd: float
@@ -157,6 +158,7 @@ class Settings:
         max_input_artifacts_files = _env_int("MAX_INPUT_ARTIFACTS_FILES", 10)
         max_input_artifact_chars = _env_int("MAX_INPUT_ARTIFACT_CHARS", 12000)
         max_input_artifacts_chars = _env_int("MAX_INPUT_ARTIFACTS_CHARS", 40000)
+        max_subprocess_output_chars = max(0, _env_int("MAX_SUBPROCESS_OUTPUT_CHARS", 200000))
         max_webhook_body_bytes = _env_int("MAX_WEBHOOK_BODY_BYTES", 262144)
         max_daily_api_calls = max(0, _env_int("MAX_DAILY_API_CALLS", 0))
         max_daily_cost_usd = max(0.0, _env_float("MAX_DAILY_COST_USD", 0.0))
@@ -197,6 +199,7 @@ class Settings:
             max_input_artifacts_files=max_input_artifacts_files,
             max_input_artifact_chars=max_input_artifact_chars,
             max_input_artifacts_chars=max_input_artifacts_chars,
+            max_subprocess_output_chars=max_subprocess_output_chars,
             max_webhook_body_bytes=max_webhook_body_bytes,
             max_daily_api_calls=max_daily_api_calls,
             max_daily_cost_usd=max_daily_cost_usd,
