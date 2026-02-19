@@ -94,3 +94,9 @@ def build_policy_from_env(allowed_binaries: set[str], sandbox: bool, sandbox_wra
         sandbox_wrapper_args=sandbox_wrapper_args,
         network_policy=normalized_network_policy,
     )
+
+
+def assert_startup_policy_safe(*, enable_real_cli: bool, policy: ExecutionPolicy) -> None:
+    if not enable_real_cli:
+        return
+    policy.assert_real_cli_safe()

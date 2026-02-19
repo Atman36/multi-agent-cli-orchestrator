@@ -59,6 +59,17 @@
     "summary": {
       "type": "string"
     },
+    "change_status": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "enum": [
+        "changed",
+        "no_changes",
+        null
+      ]
+    },
     "secrets_check": {
       "type": [
         "string",
@@ -227,6 +238,17 @@
         },
         "summary": {
           "type": "string"
+        },
+        "change_status": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "enum": [
+            "changed",
+            "no_changes",
+            null
+          ]
         },
         "secrets_check": {
           "type": [

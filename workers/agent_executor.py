@@ -96,7 +96,11 @@ class AgentExecutor(BaseWorker):
             )
 
         patch_diff = self.postprocess_patch(ctx, self.capture_patch_diff(ctx, base_commit))
+        patch_has_changes = bool(patch_diff.strip())
+        change_status = "changed" if status == "success" and patch_has_changes else "no_changes" if status == "success" else None
         logs_txt = self.build_logs(ctx, result, status)
+        if change_status is not None:
+            logs_txt += f"change_status={change_status}\n"
 
         self.write_artifacts(
             ctx,
@@ -116,7 +120,12 @@ class AgentExecutor(BaseWorker):
             attempts=1,
             started_at=started_at,
             finished_at=finished_at,
-            summary=parsed.summary,
+            summary=(
+                f"{parsed.summary} ({change_status})"
+                if change_status is not None
+                else parsed.summary
+            ),
+            change_status=change_status,
             artifacts=self.artifact_paths(ctx),
             metrics=Metrics(duration_ms=result.duration_ms),
             error=error,

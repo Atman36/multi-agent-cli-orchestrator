@@ -77,6 +77,30 @@ class ClaudeWorkerTests(unittest.TestCase):
             self.assertIn("--allowedTools", cmd)
             self.assertIn("Read,Edit", cmd)
 
+    def test_reviewer_forces_read_only_even_with_mutating_override(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            step = StepSpec(
+                step_id="step04",
+                agent="claude",
+                role="reviewer",
+                prompt="review",
+                allowed_tools=["Read", "Edit", "Write", "Bash", "Grep"],
+            )
+            ctx = _ctx(step, Path(td))
+            self.assertEqual(_claude_allowed_tools(ctx), ["Read", "Grep"])
+
+    def test_unknown_tools_are_filtered_out(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            step = StepSpec(
+                step_id="step05",
+                agent="claude",
+                role="implementer",
+                prompt="implement",
+                allowed_tools=["Read", "UnknownTool"],
+            )
+            ctx = _ctx(step, Path(td))
+            self.assertEqual(_claude_allowed_tools(ctx), ["Read"])
+
 
 if __name__ == "__main__":
     unittest.main()

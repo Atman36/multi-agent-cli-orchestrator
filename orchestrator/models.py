@@ -101,6 +101,7 @@ class ArtifactPaths(BaseModel):
 
 
 RESULT_STATUS = Literal["success", "failed", "retryable", "timeout", "cancelled", "needs_human", "running"]
+CHANGE_STATUS = Literal["changed", "no_changes"]
 
 
 class ErrorInfo(BaseModel):
@@ -132,6 +133,7 @@ class StepResult(BaseModel):
     finished_at: str
 
     summary: str
+    change_status: CHANGE_STATUS | None = None
     artifacts: ArtifactPaths
     secrets_check: SECRETS_CHECK | None = None
     metrics: Metrics = Field(default_factory=Metrics)

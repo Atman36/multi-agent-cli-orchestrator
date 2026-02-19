@@ -27,18 +27,20 @@ CLAUDE_SAFE_TOOLS = {
     "Write",
     "Bash",
 }
+CLAUDE_REVIEWER_TOOLS = ["Read", "Grep", "Glob"]
 
 
 def _default_allowed_tools(role: str) -> list[str]:
     normalized = role.lower()
     if "review" in normalized:
-        return ["Read", "Grep", "Glob"]
+        return CLAUDE_REVIEWER_TOOLS
     # Claude stays review-first in this orchestrator.
-    return ["Read", "Grep", "Glob"]
+    return CLAUDE_REVIEWER_TOOLS
 
 
 def _claude_allowed_tools(ctx: StepContext) -> list[str]:
     requested = ctx.step.allowed_tools
+    role_is_reviewer = "review" in ctx.step.role.lower()
     if requested is None:
         return _default_allowed_tools(ctx.step.role)
 
@@ -61,7 +63,23 @@ def _claude_allowed_tools(ctx: StepContext) -> list[str]:
             ctx.step.step_id,
             ",".join(unknown),
         )
-    return normalized
+
+    filtered = [tool for tool in normalized if tool in CLAUDE_SAFE_TOOLS]
+    if not filtered:
+        return _default_allowed_tools(ctx.step.role)
+
+    if role_is_reviewer:
+        reviewer_filtered = [tool for tool in filtered if tool in CLAUDE_REVIEWER_TOOLS]
+        denied = [tool for tool in filtered if tool not in CLAUDE_REVIEWER_TOOLS]
+        if denied:
+            log.warning(
+                "Step %s requested mutating Claude tools for reviewer role; forcing read-only: %s",
+                ctx.step.step_id,
+                ",".join(denied),
+            )
+        return reviewer_filtered or CLAUDE_REVIEWER_TOOLS
+
+    return filtered
 
 
 def _content_text(value: Any) -> str:

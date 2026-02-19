@@ -16,7 +16,7 @@ from orchestrator.budget import BudgetLimitExceeded, BudgetTracker
 from orchestrator.config import Settings
 from orchestrator.logging_utils import setup_logging
 from orchestrator.models import JobSpec, JobResult, StepResult, ArtifactPaths, ErrorInfo, utc_now_iso
-from orchestrator.policy import build_policy_from_env, PolicyError
+from orchestrator.policy import build_policy_from_env, PolicyError, assert_startup_policy_safe
 from orchestrator.preflight import assert_real_cli_ready, PreflightError
 from orchestrator.retention import run_retention
 from orchestrator.step_requirements import required_binaries_for_job
@@ -202,6 +202,11 @@ async def run_forever_async() -> None:
         sandbox_wrapper_args=settings.sandbox_wrapper_args,
         network_policy=settings.network_policy,
     )
+    try:
+        assert_startup_policy_safe(enable_real_cli=settings.enable_real_cli, policy=policy)
+    except PolicyError:
+        log.error("Runner startup policy check failed for real CLI mode")
+        raise
 
     log.info("Runner started. enable_real_cli=%s sandbox=%s", settings.enable_real_cli, settings.sandbox)
     if policy.network_policy == "deny" and (not policy.sandbox or not policy.sandbox_wrapper):

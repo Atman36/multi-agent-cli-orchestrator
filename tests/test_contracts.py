@@ -97,6 +97,7 @@ class ContractTests(unittest.TestCase):
                 started_at=now,
                 finished_at=now,
                 summary="ok",
+                change_status="changed",
                 artifacts=paths,
                 secrets_check="passed",
             )
@@ -120,6 +121,7 @@ class ContractTests(unittest.TestCase):
             started_at=now,
             finished_at=now,
             summary="reviewed",
+            change_status="no_changes",
             artifacts=step_artifacts,
             secrets_check="passed",
         )
