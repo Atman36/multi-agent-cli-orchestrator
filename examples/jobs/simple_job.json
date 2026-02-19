@@ -1,0 +1,20 @@
+{
+  "goal": "Create an MVP skeleton with file-queue and simulated workers.",
+  "workdir": ".",
+  "tags": [
+    "example",
+    "mvp"
+  ],
+  "metadata": {
+    "author": "repo-generator"
+  },
+  "policy": {
+    "sandbox": true,
+    "network": "deny",
+    "allowed_binaries": [
+      "opencode",
+      "codex",
+      "claude"
+    ]
+  }
+}

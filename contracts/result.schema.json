@@ -1,0 +1,298 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.local/schemas/result.schema.json",
+  "title": "Multi-Agent CLI Orchestrator Result",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "kind",
+    "job_id",
+    "status",
+    "started_at",
+    "finished_at",
+    "summary",
+    "artifacts"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "1.0"
+    },
+    "kind": {
+      "type": "string",
+      "enum": [
+        "step",
+        "job"
+      ]
+    },
+    "job_id": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{32}$|^[a-zA-Z0-9._-]{8,64}$"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "success",
+        "failed",
+        "retryable",
+        "timeout",
+        "cancelled",
+        "needs_human",
+        "running"
+      ]
+    },
+    "attempts": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 50,
+      "default": 1
+    },
+    "started_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "finished_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "summary": {
+      "type": "string"
+    },
+    "artifacts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "report_md",
+        "patch_diff",
+        "logs_txt",
+        "result_json"
+      ],
+      "properties": {
+        "report_md": {
+          "type": "string"
+        },
+        "patch_diff": {
+          "type": "string"
+        },
+        "logs_txt": {
+          "type": "string"
+        },
+        "result_json": {
+          "type": "string"
+        }
+      }
+    },
+    "metrics": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "duration_ms": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "cost_usd": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "tokens_in": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "tokens_out": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      }
+    },
+    "error": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": false,
+      "required": [
+        "code",
+        "message"
+      ],
+      "properties": {
+        "code": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        },
+        "details": {
+          "type": "object",
+          "additionalProperties": true
+        }
+      }
+    },
+    "step_id": {
+      "type": "string"
+    },
+    "agent": {
+      "type": "string"
+    },
+    "role": {
+      "type": "string"
+    },
+    "steps": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/stepResult"
+      }
+    }
+  },
+  "$defs": {
+    "stepResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "kind",
+        "job_id",
+        "step_id",
+        "agent",
+        "role",
+        "status",
+        "started_at",
+        "finished_at",
+        "summary",
+        "artifacts"
+      ],
+      "properties": {
+        "schema_version": {
+          "type": "string",
+          "const": "1.0"
+        },
+        "kind": {
+          "type": "string",
+          "const": "step"
+        },
+        "job_id": {
+          "type": "string"
+        },
+        "step_id": {
+          "type": "string"
+        },
+        "agent": {
+          "type": "string"
+        },
+        "role": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "success",
+            "failed",
+            "retryable",
+            "timeout",
+            "cancelled",
+            "needs_human",
+            "running"
+          ]
+        },
+        "attempts": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 50,
+          "default": 1
+        },
+        "started_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "finished_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "summary": {
+          "type": "string"
+        },
+        "artifacts": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "report_md",
+            "patch_diff",
+            "logs_txt",
+            "result_json"
+          ],
+          "properties": {
+            "report_md": {
+              "type": "string"
+            },
+            "patch_diff": {
+              "type": "string"
+            },
+            "logs_txt": {
+              "type": "string"
+            },
+            "result_json": {
+              "type": "string"
+            }
+          }
+        },
+        "metrics": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "error": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": true
+        }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "step"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "step_id",
+          "agent",
+          "role"
+        ],
+        "properties": {
+          "steps": false
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "job"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "steps"
+        ],
+        "properties": {
+          "step_id": false,
+          "agent": false,
+          "role": false
+        }
+      }
+    }
+  ]
+}

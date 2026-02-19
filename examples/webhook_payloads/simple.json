@@ -1,0 +1,20 @@
+{
+  "goal": "Webhook-triggered job: generate simulated artifacts for a 3-step pipeline.",
+  "workdir": ".",
+  "tags": [
+    "webhook",
+    "example"
+  ],
+  "metadata": {
+    "source": "curl"
+  },
+  "policy": {
+    "sandbox": true,
+    "network": "deny",
+    "allowed_binaries": [
+      "opencode",
+      "codex",
+      "claude"
+    ]
+  }
+}

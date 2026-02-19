@@ -1,0 +1,22 @@
+{
+  "id": "every_minute_example",
+  "enabled": false,
+  "schedule": "*/1 * * * *",
+  "payload": {
+    "goal": "Scheduled job (example) — disabled by default",
+    "tags": [
+      "cron",
+      "example"
+    ],
+    "policy": {
+      "sandbox": true,
+      "network": "deny",
+      "allowed_binaries": [
+        "opencode",
+        "codex",
+        "claude"
+      ]
+    },
+    "workdir": "."
+  }
+}

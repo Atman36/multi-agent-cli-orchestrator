@@ -1,0 +1,31 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+.venv/
+.env
+
+# Runtime data (keep .gitkeep placeholders)
+artifacts/*
+!artifacts/.gitkeep
+workspaces/*
+!workspaces/.gitkeep
+var/queue/pending/*
+!var/queue/pending/.gitkeep
+var/queue/running/*
+!var/queue/running/.gitkeep
+var/queue/done/*
+!var/queue/done/.gitkeep
+var/queue/failed/*
+!var/queue/failed/.gitkeep
+var/logs/*
+!var/logs/.gitkeep
+
+# OS
+.DS_Store
+
+# Internal dev/planning docs (not for public repo)
+docs/DEVELOPMENT_PLAN.md
+docs/FIX_PLAN.md
