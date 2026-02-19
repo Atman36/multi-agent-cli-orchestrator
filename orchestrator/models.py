@@ -21,6 +21,9 @@ class JobSource(BaseModel):
     meta: dict[str, Any] = Field(default_factory=dict)
 
 
+ON_FAILURE = Literal["stop", "continue"]
+
+
 class StepSpec(BaseModel):
     step_id: str = Field(..., description="Unique step id within job")
     agent: AGENT
@@ -32,6 +35,10 @@ class StepSpec(BaseModel):
     input_artifacts: list[str] = Field(default_factory=list, description="Relative paths inside artifacts/<job_id>/")
     apply_patches_from: list[str] = Field(default_factory=list, description="Relative patch paths to apply before the step")
     allowed_tools: list[str] | None = Field(default=None, description="Tool allowlist override for compatible agents")
+    on_failure: str = Field(
+        default="stop",
+        description="Failure strategy: 'stop' (default) halts pipeline, 'continue' proceeds to next step, 'goto:<step_id>' jumps to named step",
+    )
 
 
 class PolicySpec(BaseModel):
@@ -53,6 +60,11 @@ class JobSpec(BaseModel):
     workdir: str = Field(default=".", description="Working directory for execution (repo/workspace)")
     steps: list[StepSpec]
     policy: PolicySpec = Field(default_factory=PolicySpec)
+
+    callback_url: str | None = Field(
+        default=None,
+        description="URL to POST job result to upon completion (event-driven notification)",
+    )
 
     tags: list[str] = Field(default_factory=list)
     metadata: dict[str, Any] = Field(default_factory=dict)

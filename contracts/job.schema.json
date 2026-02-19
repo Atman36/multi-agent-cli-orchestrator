@@ -66,6 +66,12 @@
       "minLength": 1,
       "maxLength": 4096
     },
+    "callback_url": {
+      "type": ["string", "null"],
+      "format": "uri",
+      "maxLength": 2048,
+      "description": "URL to POST job result to upon completion"
+    },
     "tags": {
       "type": "array",
       "items": {
@@ -141,10 +147,16 @@
             "default": []
           },
           "allowed_tools": {
-            "type": "array",
+            "type": ["array", "null"],
             "items": {
               "type": "string"
             }
+          },
+          "on_failure": {
+            "type": "string",
+            "pattern": "^(stop|continue|goto:[0-9A-Za-z][0-9A-Za-z_-]{0,63})$",
+            "default": "stop",
+            "description": "Failure strategy: 'stop' halts pipeline, 'continue' proceeds, 'goto:<step_id>' jumps to named step"
           }
         }
       }

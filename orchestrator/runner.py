@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import asyncio
+import json as _json
 import logging
 import subprocess
 import time
 from pathlib import Path
+from urllib.parse import urlparse
 
 from dotenv import load_dotenv
 
@@ -71,6 +73,53 @@ def _run_secrets_check(step_dir: Path) -> tuple[bool, str]:
     if not msg:
         msg = "secrets check completed"
     return proc.returncode == 0, msg
+
+
+def _resolve_on_failure(on_failure: str, steps: list, current_idx: int) -> int | None:
+    """Resolve on_failure directive to next step index.
+
+    Returns:
+        None  — stop pipeline (default)
+        int   — index of the next step to execute
+    """
+    if on_failure == "stop":
+        return None
+    if on_failure == "continue":
+        nxt = current_idx + 1
+        return nxt if nxt < len(steps) else None
+    if on_failure.startswith("goto:"):
+        target_id = on_failure[5:]
+        for idx, s in enumerate(steps):
+            if s.step_id == target_id:
+                return idx
+        log.warning("on_failure goto target '%s' not found; stopping pipeline", target_id)
+        return None
+    log.warning("Unknown on_failure value '%s'; stopping pipeline", on_failure)
+    return None
+
+
+async def _fire_callback(callback_url: str, result_obj: dict) -> None:
+    """POST job result to callback_url. Best-effort, never raises."""
+    parsed = urlparse(callback_url)
+    if parsed.scheme not in ("http", "https"):
+        log.warning("callback_url has unsupported scheme: %s", callback_url)
+        return
+    try:
+        import urllib.request
+
+        body = _json.dumps(result_obj, ensure_ascii=False).encode("utf-8")
+        req = urllib.request.Request(
+            callback_url,
+            data=body,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        # Run blocking IO in executor to avoid blocking the event loop
+        loop = asyncio.get_running_loop()
+        await loop.run_in_executor(None, lambda: urllib.request.urlopen(req, timeout=15))
+        log.info("Callback delivered to %s", callback_url)
+    except Exception as e:
+        log.warning("Callback to %s failed: %s", callback_url, e)
 
 
 async def run_forever_async() -> None:
@@ -190,7 +239,9 @@ async def run_forever_async() -> None:
                     overall_status = "failed"
                     overall_error = ErrorInfo(code="policy", message=str(e))
 
-            for step in job.steps:
+            step_idx = 0
+            while step_idx < len(job.steps):
+                step = job.steps[step_idx]
                 if overall_error is not None:
                     break
                 step_id = step.step_id
@@ -391,9 +442,20 @@ async def run_forever_async() -> None:
                 step_results.append(last_result)
 
                 if last_result.status != "success":
+                    on_failure = getattr(step, "on_failure", "stop") or "stop"
+                    next_idx = _resolve_on_failure(on_failure, job.steps, step_idx)
+                    if next_idx is not None:
+                        log.info(
+                            "Step %s failed (status=%s) but on_failure=%s → jumping to step %s",
+                            step_id, last_result.status, on_failure, job.steps[next_idx].step_id,
+                        )
+                        step_idx = next_idx
+                        continue
                     overall_status = "failed"
                     overall_error = ErrorInfo(code="step_failed", message=f"Step {step_id} failed with status={last_result.status}")
                     break
+
+                step_idx += 1
 
             finished_at = utc_now_iso()
 
@@ -455,6 +517,10 @@ async def run_forever_async() -> None:
             state["status"] = overall_status
             state["finished_at"] = finished_at
             store.write_state(job.job_id, state)
+
+            # Fire callback if configured (event-driven notification)
+            if job.callback_url:
+                await _fire_callback(job.callback_url, job_result.model_dump())
 
             if overall_status == "success":
                 q.ack(claimed)

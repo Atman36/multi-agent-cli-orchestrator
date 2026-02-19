@@ -103,6 +103,12 @@ async def webhook(request: Request, authorization: Optional[str] = Header(defaul
     if project_id is not None and project_id not in settings.project_aliases:
         raise HTTPException(status_code=400, detail=f"Unknown project_id '{project_id}'")
 
+    callback_url = payload.get("callback_url")
+    if callback_url is not None:
+        callback_url = str(callback_url).strip()
+        if not callback_url:
+            callback_url = None
+
     steps_payload = payload.get("steps")
     policy_payload = payload.get("policy") or {}
     tags = list(payload.get("tags") or [])
@@ -129,6 +135,7 @@ async def webhook(request: Request, authorization: Optional[str] = Header(defaul
         steps=steps,
         policy=policy,
         project_id=project_id,
+        callback_url=callback_url,
         workdir=".",
         tags=tags,
         metadata=metadata,
