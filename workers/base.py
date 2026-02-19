@@ -31,6 +31,9 @@ class StepContext:
     policy: ExecutionPolicy
     env_allowlist: set[str]
     sensitive_env_vars: set[str]
+    sandbox_clear_env: bool
+    max_input_artifacts_files: int
+    max_input_artifact_chars: int
     max_input_artifacts_chars: int
     idle_watchdog_sec: int | None = None
 
@@ -59,37 +62,63 @@ class BaseWorker:
             return prompt
 
         parts = [prompt.rstrip(), "", "## Input artifacts"]
-        remaining = max(0, ctx.max_input_artifacts_chars)
+        remaining_total = max(0, ctx.max_input_artifacts_chars)
+        per_file_limit = max(0, ctx.max_input_artifact_chars)
+        max_files = max(0, ctx.max_input_artifacts_files)
+        used_files = 0
         truncated = False
 
         for rel_path in ctx.step.input_artifacts:
+            if used_files >= max_files:
+                truncated = True
+                break
+
             abs_path = (ctx.job_dir / rel_path).resolve()
-            header = f"=== artifact: {rel_path} ==="
+            header = f"=== BEGIN ARTIFACT: {rel_path} ==="
+            footer = "=== END ARTIFACT ==="
 
             if not _is_within(ctx.job_dir.resolve(), abs_path):
-                parts.extend([header, "[invalid_path]", "==="])
+                parts.extend([header, "[invalid_path]", footer])
+                used_files += 1
                 continue
             if not abs_path.exists():
-                parts.extend([header, "[missing]", "==="])
+                parts.extend([header, "[missing]", footer])
+                used_files += 1
                 continue
 
             text = abs_path.read_text(encoding="utf-8", errors="replace")
-            if remaining <= 0:
-                parts.extend([header, "[truncated]", "==="])
+            truncation_notes: list[str] = []
+
+            if per_file_limit == 0:
+                text = ""
+                truncation_notes.append("[truncated:file_limit]")
+            elif len(text) > per_file_limit:
+                text = text[:per_file_limit]
+                truncation_notes.append("[truncated:file_limit]")
+
+            if remaining_total <= 0:
+                parts.extend([header, "[truncated:total_limit]", footer])
                 truncated = True
+                used_files += 1
                 continue
 
-            if len(text) > remaining:
-                text = text[:remaining] + "\n[truncated]"
-                remaining = 0
+            if len(text) > remaining_total:
+                text = text[:remaining_total]
+                truncation_notes.append("[truncated:total_limit]")
+                remaining_total = 0
                 truncated = True
             else:
-                remaining -= len(text)
+                remaining_total -= len(text)
 
-            parts.extend([header, text, "==="])
+            if truncation_notes:
+                text = f"{text}\n" + "\n".join(truncation_notes)
+                truncated = True
+
+            parts.extend([header, text, footer])
+            used_files += 1
 
         if truncated:
-            parts.append("[artifacts_truncated]")
+            parts.append("[artifacts_truncated_or_limited]")
 
         return "\n".join(parts).rstrip() + "\n"
 

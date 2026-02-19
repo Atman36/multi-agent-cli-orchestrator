@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 from datetime import datetime, timezone
 
-from orchestrator.models import Metrics, StepResult
+from orchestrator.models import ErrorInfo, Metrics, StepResult
 from orchestrator.subprocess_utils import run_command
 from workers.base import BaseWorker, StepContext
 from workers.registry import register_worker
@@ -34,6 +34,7 @@ class CodexWorker(BaseWorker):
             cwd=ctx.job.workdir,
             env={},
             env_allowlist=sorted(ctx.env_allowlist),
+            clear_env=ctx.sandbox_clear_env,
             timeout_sec=ctx.step.timeout_sec,
             idle_timeout_sec=ctx.idle_watchdog_sec,
             log_file=None,
@@ -64,6 +65,13 @@ class CodexWorker(BaseWorker):
         )
 
         status = "success" if result.exit_code == 0 else "failed"
+        error = None
+        if status != "success":
+            error = ErrorInfo(
+                code="agent_exit_nonzero",
+                message=f"codex exited with code {result.exit_code}",
+                details={"exit_code": result.exit_code},
+            )
         return StepResult(
             job_id=ctx.job.job_id,
             step_id=ctx.step.step_id,
@@ -76,7 +84,7 @@ class CodexWorker(BaseWorker):
             summary=f"Codex exit_code={result.exit_code}",
             artifacts=self.artifact_paths(ctx),
             metrics=Metrics(duration_ms=result.duration_ms),
-            error=None,
+            error=error,
         )
 
     async def simulate(self, ctx: StepContext) -> StepResult:

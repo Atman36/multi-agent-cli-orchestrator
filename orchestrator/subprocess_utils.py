@@ -13,6 +13,8 @@ from typing import Mapping, Sequence
 
 log = logging.getLogger("subprocess")
 _missing_allowlist_warnings: set[str] = set()
+_safe_base_env_keys_default = ("PATH", "HOME", "TMPDIR")
+_safe_base_env_keys_clear = ("PATH",)
 
 
 @dataclass
@@ -66,6 +68,7 @@ async def run_command(
     cwd: str | Path,
     env: Mapping[str, str] | None,
     env_allowlist: Sequence[str] | None,
+    clear_env: bool = False,
     timeout_sec: int,
     idle_timeout_sec: int | None = None,
     log_file: Path | None = None,
@@ -79,7 +82,13 @@ async def run_command(
     killed_by_watchdog = False
 
     allowlist = [k for k in (env_allowlist or []) if k]
+    base_keys = _safe_base_env_keys_clear if clear_env else _safe_base_env_keys_default
     safe_env: dict[str, str] = {}
+    for key in base_keys:
+        val = os.environ.get(key)
+        if val is not None:
+            safe_env[key] = val
+
     for key in allowlist:
         val = os.environ.get(key)
         if val is None:
@@ -95,8 +104,7 @@ async def run_command(
             continue
         safe_env[key] = val
 
-    if allowlist:
-        log.debug("Passing env vars to subprocess: %s", ",".join(sorted(safe_env.keys())))
+    log.info("Passing env vars to subprocess: %s", ",".join(sorted(safe_env.keys())))
 
     proc = await asyncio.create_subprocess_exec(
         *cmd,

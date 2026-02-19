@@ -143,6 +143,9 @@ async def run_forever_async() -> None:
                         policy=policy,
                         env_allowlist=settings.env_allowlist,
                         sensitive_env_vars=settings.sensitive_env_vars,
+                        sandbox_clear_env=settings.sandbox_clear_env,
+                        max_input_artifacts_files=settings.max_input_artifacts_files,
+                        max_input_artifact_chars=settings.max_input_artifact_chars,
                         max_input_artifacts_chars=settings.max_input_artifacts_chars,
                         idle_watchdog_sec=settings.runner_max_idle_sec,
                     )

@@ -93,6 +93,8 @@ python -m cli status <job_id>
   - `ENABLE_REAL_CLI=1`
   - настроить allowlist (`ALLOWED_BINARIES=...`)
   - настроить allowlist окружения (`ENV_ALLOWLIST=...`)
+  - при необходимости включить жёсткий режим env (`SANDBOX_CLEAR_ENV=1`)
+  - настроить лимиты входных артефактов (`MAX_INPUT_ARTIFACTS_FILES`, `MAX_INPUT_ARTIFACT_CHARS`, `MAX_INPUT_ARTIFACTS_CHARS`)
   - настроить sandbox wrapper или отключить sandbox осознанно
 
 См. подробности: `docs/SECURITY.md`.

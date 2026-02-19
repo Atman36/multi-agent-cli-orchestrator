@@ -55,6 +55,9 @@ class Settings:
 
     env_allowlist: set[str]
     sensitive_env_vars: set[str]
+    sandbox_clear_env: bool
+    max_input_artifacts_files: int
+    max_input_artifact_chars: int
     max_input_artifacts_chars: int
     max_webhook_body_bytes: int
 
@@ -92,6 +95,9 @@ class Settings:
             "SENSITIVE_ENV_VARS",
             "ANTHROPIC_API_KEY,OPENAI_API_KEY",
         )
+        sandbox_clear_env = _env_bool("SANDBOX_CLEAR_ENV", False)
+        max_input_artifacts_files = _env_int("MAX_INPUT_ARTIFACTS_FILES", 10)
+        max_input_artifact_chars = _env_int("MAX_INPUT_ARTIFACT_CHARS", 12000)
         max_input_artifacts_chars = _env_int("MAX_INPUT_ARTIFACTS_CHARS", 40000)
         max_webhook_body_bytes = _env_int("MAX_WEBHOOK_BODY_BYTES", 262144)
         log_level = _env_str("LOG_LEVEL", "INFO")
@@ -116,6 +122,9 @@ class Settings:
             network_policy=network_policy,
             env_allowlist=env_allowlist,
             sensitive_env_vars=sensitive_env_vars,
+            sandbox_clear_env=sandbox_clear_env,
+            max_input_artifacts_files=max_input_artifacts_files,
+            max_input_artifact_chars=max_input_artifact_chars,
             max_input_artifacts_chars=max_input_artifacts_chars,
             max_webhook_body_bytes=max_webhook_body_bytes,
             log_level=log_level,

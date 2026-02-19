@@ -102,6 +102,7 @@ class ClaudeWorker(BaseWorker):
             cwd=ctx.job.workdir,
             env={},
             env_allowlist=sorted(ctx.env_allowlist),
+            clear_env=ctx.sandbox_clear_env,
             timeout_sec=ctx.step.timeout_sec,
             idle_timeout_sec=ctx.idle_watchdog_sec,
             log_file=None,
