@@ -13,6 +13,8 @@
 
 Runner сам сохранит `result.json` по контракту.
 
+Для API-агентов (без subprocess CLI) можно наследоваться от `workers/api_worker.py::APIWorker` и реализовать только `call_api(prompt, context)`.
+
 ## 2) Зарегистрируйте worker в реестре
 
 В файле worker зарегистрируйте экземпляр в `workers/registry.py`:
@@ -40,6 +42,11 @@ register_worker(GeminiWorker())
   "allowed_tools": ["Read", "Grep", "Glob"]
 }
 ```
+
+Поля шага по обработке ошибок:
+
+- `on_failure: "stop" | "continue" | "ask_human" | "goto:<step_id>"`
+- `ask_human` остановит pipeline и переместит job в `var/queue/awaiting_approval`.
 
 ## 4) Следуйте контрактам
 

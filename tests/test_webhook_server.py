@@ -168,6 +168,37 @@ class WebhookServerTests(unittest.TestCase):
                     self.assertEqual(len(awaiting), 1)
                     self.assertEqual(len(pending), 0)
 
+    def test_webhook_accepts_context_fields(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            queue_root = Path(td) / "queue"
+            artifacts_root = Path(td) / "artifacts"
+            workspaces_root = Path(td) / "workspaces"
+            env = {
+                "WEBHOOK_TOKEN": "test-token",
+                "QUEUE_ROOT": str(queue_root),
+                "ARTIFACTS_ROOT": str(artifacts_root),
+                "WORKSPACES_ROOT": str(workspaces_root),
+            }
+            with patch.dict(os.environ, env, clear=False):
+                webhook_server.settings = None
+                webhook_server.queue = None
+                with TestClient(webhook_server.app) as client:
+                    resp = client.post(
+                        "/webhook",
+                        headers={"Authorization": "Bearer test-token"},
+                        json={
+                            "goal": "run tests",
+                            "context_strategy": "sliding",
+                            "context_window": [{"role": "user", "content": "hello"}],
+                        },
+                    )
+                    self.assertEqual(resp.status_code, 200)
+                    pending = list((queue_root / "pending").glob("*.json"))
+                    self.assertEqual(len(pending), 1)
+                    obj = json.loads(pending[0].read_text(encoding="utf-8"))
+                    self.assertEqual(obj["context_strategy"], "sliding")
+                    self.assertEqual(obj["context_window"][0]["content"], "hello")
+
     def test_metrics_endpoint_returns_prometheus_text(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             queue_root = Path(td) / "queue"

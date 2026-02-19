@@ -129,6 +129,9 @@ class FileQueue:
     def fail(self, claimed: ClaimedJob) -> None:
         self._move_to_dir_no_overwrite(claimed.path, self.failed)
 
+    def await_approval(self, claimed: ClaimedJob) -> None:
+        self._move_to_dir_no_overwrite(claimed.path, self.awaiting_approval)
+
     def requeue(self, claimed: ClaimedJob) -> None:
         self._move_to_dir_no_overwrite(claimed.path, self.pending)
 

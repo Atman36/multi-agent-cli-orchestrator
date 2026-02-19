@@ -6,6 +6,7 @@ import logging
 import subprocess
 import time
 from pathlib import Path
+from typing import Any, Literal
 from urllib.parse import urlparse
 
 from dotenv import load_dotenv
@@ -28,6 +29,8 @@ from workers import ensure_workers_registered, get_worker
 
 
 log = logging.getLogger("runner")
+_CONTEXT_SLIDING_MAX_MESSAGES = 12
+_CONTEXT_SUMMARY_MAX_CHARS = 4000
 
 
 def _repo_root() -> Path:
@@ -75,11 +78,12 @@ def _run_secrets_check(step_dir: Path) -> tuple[bool, str]:
     return proc.returncode == 0, msg
 
 
-def _resolve_on_failure(on_failure: str, steps: list, current_idx: int) -> int | None:
+def _resolve_on_failure(on_failure: str, steps: list, current_idx: int) -> int | Literal["ask_human"] | None:
     """Resolve on_failure directive to next step index.
 
     Returns:
         None  — stop pipeline (default)
+        "ask_human" — move job to awaiting_approval
         int   — index of the next step to execute
     """
     if on_failure == "stop":
@@ -87,6 +91,8 @@ def _resolve_on_failure(on_failure: str, steps: list, current_idx: int) -> int |
     if on_failure == "continue":
         nxt = current_idx + 1
         return nxt if nxt < len(steps) else None
+    if on_failure == "ask_human":
+        return "ask_human"
     if on_failure.startswith("goto:"):
         target_id = on_failure[5:]
         for idx, s in enumerate(steps):
@@ -96,6 +102,54 @@ def _resolve_on_failure(on_failure: str, steps: list, current_idx: int) -> int |
         return None
     log.warning("Unknown on_failure value '%s'; stopping pipeline", on_failure)
     return None
+
+
+def _normalize_context_window(raw: list[Any]) -> list[dict[str, str]]:
+    out: list[dict[str, str]] = []
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        role = str(item.get("role") or "user").strip() or "user"
+        content = str(item.get("content") or "").strip()
+        if not content:
+            continue
+        out.append({"role": role[:32], "content": content})
+    return out
+
+
+def _apply_context_strategy(messages: list[dict[str, str]], strategy: str) -> list[dict[str, str]]:
+    if strategy == "full":
+        return list(messages)
+    if strategy == "sliding":
+        return list(messages[-_CONTEXT_SLIDING_MAX_MESSAGES:])
+    if strategy == "summarize":
+        if len(messages) <= _CONTEXT_SLIDING_MAX_MESSAGES:
+            return list(messages)
+        tail_size = _CONTEXT_SLIDING_MAX_MESSAGES - 1
+        head = messages[:-tail_size]
+        tail = messages[-tail_size:]
+        summary_lines: list[str] = []
+        for msg in head:
+            snippet = msg["content"].replace("\n", " ").strip()
+            if len(snippet) > 140:
+                snippet = snippet[:137] + "..."
+            summary_lines.append(f"- {msg['role']}: {snippet}")
+        summary_text = "Compressed context history:\n" + "\n".join(summary_lines)
+        if len(summary_text) > _CONTEXT_SUMMARY_MAX_CHARS:
+            summary_text = summary_text[: _CONTEXT_SUMMARY_MAX_CHARS - 3] + "..."
+        return [{"role": "system", "content": summary_text}] + tail
+    return list(messages[-_CONTEXT_SLIDING_MAX_MESSAGES:])
+
+
+def _append_step_to_context(messages: list[dict[str, str]], *, step_prompt: str, step_result: StepResult) -> list[dict[str, str]]:
+    out = list(messages)
+    out.append({"role": "user", "content": step_prompt.strip()})
+    assistant_line = (
+        f"[{step_result.step_id}] {step_result.agent}:{step_result.role} "
+        f"status={step_result.status} summary={step_result.summary}"
+    )
+    out.append({"role": "assistant", "content": assistant_line.strip()})
+    return out
 
 
 async def _fire_callback(callback_url: str, result_obj: dict) -> None:
@@ -222,6 +276,19 @@ async def run_forever_async() -> None:
                 "steps": {},
             }
             store.write_state(job.job_id, state)
+            context_strategy = job.context_strategy
+            context_window = _apply_context_strategy(
+                _normalize_context_window(job.context_window),
+                context_strategy,
+            )
+            store.write_context(
+                job.job_id,
+                {
+                    "strategy": context_strategy,
+                    "messages": context_window,
+                    "updated_at": utc_now_iso(),
+                },
+            )
 
             step_results: list[StepResult] = []
 
@@ -288,6 +355,8 @@ async def run_forever_async() -> None:
                         max_input_artifacts_chars=settings.max_input_artifacts_chars,
                         idle_watchdog_sec=settings.runner_max_idle_sec,
                         non_git_workdir_status=settings.non_git_workdir_status,
+                        context_window=list(context_window),
+                        context_strategy=context_strategy,
                     )
                     api_call_consumed = False
 
@@ -440,11 +509,35 @@ async def run_forever_async() -> None:
                     break
 
                 step_results.append(last_result)
+                context_window = _append_step_to_context(
+                    context_window,
+                    step_prompt=step.prompt,
+                    step_result=last_result,
+                )
+                context_window = _apply_context_strategy(context_window, context_strategy)
+                store.write_context(
+                    job.job_id,
+                    {
+                        "strategy": context_strategy,
+                        "messages": context_window,
+                        "updated_at": utc_now_iso(),
+                    },
+                )
 
                 if last_result.status != "success":
                     on_failure = getattr(step, "on_failure", "stop") or "stop"
+                    if last_result.status == "needs_human":
+                        on_failure = "ask_human"
                     next_idx = _resolve_on_failure(on_failure, job.steps, step_idx)
-                    if next_idx is not None:
+                    if next_idx == "ask_human":
+                        overall_status = "needs_human"
+                        overall_error = ErrorInfo(
+                            code="awaiting_human",
+                            message=f"Step {step_id} requested human intervention",
+                            details={"step_id": step_id, "status": last_result.status},
+                        )
+                        break
+                    if isinstance(next_idx, int):
                         log.info(
                             "Step %s failed (status=%s) but on_failure=%s → jumping to step %s",
                             step_id, last_result.status, on_failure, job.steps[next_idx].step_id,
@@ -524,6 +617,8 @@ async def run_forever_async() -> None:
 
             if overall_status == "success":
                 q.ack(claimed)
+            elif overall_status == "needs_human":
+                q.await_approval(claimed)
             else:
                 q.fail(claimed)
 

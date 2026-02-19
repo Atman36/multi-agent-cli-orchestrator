@@ -8,6 +8,7 @@ import unittest
 from pathlib import Path
 
 from fsqueue.file_queue import DuplicateJobError, FileQueue
+from fsqueue.file_queue import ClaimedJob
 
 
 class FileQueueTests(unittest.TestCase):
@@ -89,6 +90,16 @@ class FileQueueTests(unittest.TestCase):
             self.assertTrue(unlocked)
             self.assertEqual(q.queue_state("job-1"), "failed")
             self.assertEqual(q.queue_state("job-12"), "running")
+
+    def test_await_approval_moves_claimed_job_to_awaiting(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            q = FileQueue(Path(td))
+            running_file = q.running / "job-await-1.json"
+            running_file.write_text(json.dumps({"job_id": "job-await-1", "goal": "x"}), encoding="utf-8")
+            claimed = ClaimedJob(job_id="job-await-1", path=running_file)
+
+            q.await_approval(claimed)
+            self.assertEqual(q.queue_state("job-await-1"), "awaiting_approval")
 
 
 if __name__ == "__main__":

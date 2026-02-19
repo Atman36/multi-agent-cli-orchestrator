@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+import re
 from datetime import datetime, timezone
 from typing import Any, Literal, Optional
 from uuid import uuid4
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 AGENT = str
@@ -21,7 +22,7 @@ class JobSource(BaseModel):
     meta: dict[str, Any] = Field(default_factory=dict)
 
 
-ON_FAILURE = Literal["stop", "continue"]
+ON_FAILURE = Literal["stop", "continue", "ask_human"]
 
 
 class StepSpec(BaseModel):
@@ -37,8 +38,21 @@ class StepSpec(BaseModel):
     allowed_tools: list[str] | None = Field(default=None, description="Tool allowlist override for compatible agents")
     on_failure: str = Field(
         default="stop",
-        description="Failure strategy: 'stop' (default) halts pipeline, 'continue' proceeds to next step, 'goto:<step_id>' jumps to named step",
+        description=(
+            "Failure strategy: 'stop' (default) halts pipeline, 'continue' proceeds to next step, "
+            "'ask_human' pauses job and moves it to awaiting_approval, "
+            "'goto:<step_id>' jumps to named step"
+        ),
     )
+
+    @field_validator("on_failure")
+    @classmethod
+    def _validate_on_failure(cls, value: str) -> str:
+        if value in {"stop", "continue", "ask_human"}:
+            return value
+        if re.fullmatch(r"goto:[0-9A-Za-z][0-9A-Za-z_-]{0,63}", value):
+            return value
+        raise ValueError("on_failure must be one of: stop, continue, ask_human, goto:<step_id>")
 
 
 class PolicySpec(BaseModel):
@@ -64,6 +78,14 @@ class JobSpec(BaseModel):
     callback_url: str | None = Field(
         default=None,
         description="URL to POST job result to upon completion (event-driven notification)",
+    )
+    context_window: list[dict[str, Any]] = Field(
+        default_factory=list,
+        description="Conversation history shared across steps",
+    )
+    context_strategy: Literal["full", "summarize", "sliding"] = Field(
+        default="sliding",
+        description="How context_window is maintained between steps",
     )
 
     tags: list[str] = Field(default_factory=list)

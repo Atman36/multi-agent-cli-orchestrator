@@ -68,6 +68,9 @@ class ArtifactStore:
     def write_state(self, job_id: str, state_obj: dict[str, Any]) -> None:
         self._atomic_write_json(self.job_dir(job_id) / "state.json", state_obj)
 
+    def write_context(self, job_id: str, context_obj: dict[str, Any]) -> None:
+        self._atomic_write_json(self.job_dir(job_id) / "context.json", context_obj)
+
     def write_job_artifacts(self, job_id: str, *, report_md: str, patch_diff: str, logs_txt: str, result_obj: dict[str, Any]) -> None:
         jd = self.job_dir(job_id)
         self._atomic_write_text(jd / "report.md", report_md)

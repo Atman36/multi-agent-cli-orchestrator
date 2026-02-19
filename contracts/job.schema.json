@@ -154,12 +154,29 @@
           },
           "on_failure": {
             "type": "string",
-            "pattern": "^(stop|continue|goto:[0-9A-Za-z][0-9A-Za-z_-]{0,63})$",
+            "pattern": "^(stop|continue|ask_human|goto:[0-9A-Za-z][0-9A-Za-z_-]{0,63})$",
             "default": "stop",
-            "description": "Failure strategy: 'stop' halts pipeline, 'continue' proceeds, 'goto:<step_id>' jumps to named step"
+            "description": "Failure strategy: 'stop' halts pipeline, 'continue' proceeds, 'ask_human' pauses for approval, 'goto:<step_id>' jumps to named step"
           }
         }
       }
+    },
+    "context_window": {
+      "type": "array",
+      "default": [],
+      "items": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "role": {"type": "string"},
+          "content": {"type": "string"}
+        }
+      }
+    },
+    "context_strategy": {
+      "type": "string",
+      "enum": ["full", "summarize", "sliding"],
+      "default": "sliding"
     },
     "policy": {
       "type": "object",

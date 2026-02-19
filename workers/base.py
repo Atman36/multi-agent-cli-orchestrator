@@ -2,10 +2,11 @@ from __future__ import annotations
 
 import asyncio
 import subprocess
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from functools import lru_cache
 from pathlib import Path
+from typing import Any
 
 from orchestrator.git_utils import current_head_commit, diff_since_commit, is_git_repo
 from orchestrator.log_sanitizer import redact
@@ -39,6 +40,8 @@ class StepContext:
     max_input_artifacts_chars: int
     idle_watchdog_sec: int | None = None
     non_git_workdir_status: str = "needs_human"
+    context_window: list[dict[str, Any]] = field(default_factory=list)
+    context_strategy: str = "sliding"
 
 
 class WorkerError(RuntimeError):
@@ -73,6 +76,17 @@ class BaseWorker:
         system_prompt = self.load_prompt(ctx.step.agent)
         if system_prompt:
             prompt = f"{system_prompt}\n\n## Task\n{prompt}"
+
+        if ctx.context_window:
+            context_parts = [prompt.rstrip(), "", f"## Conversation context ({ctx.context_strategy})"]
+            for idx, msg in enumerate(ctx.context_window, start=1):
+                role = str(msg.get("role") or "unknown").strip() or "unknown"
+                content = str(msg.get("content") or "").strip()
+                if not content:
+                    continue
+                context_parts.append(f"### {idx}. {role}")
+                context_parts.append(content)
+            prompt = "\n".join(context_parts).rstrip() + "\n"
 
         if not ctx.step.input_artifacts:
             return prompt

@@ -113,6 +113,8 @@ async def webhook(request: Request, authorization: Optional[str] = Header(defaul
     policy_payload = payload.get("policy") or {}
     tags = list(payload.get("tags") or [])
     metadata = dict(payload.get("metadata") or {})
+    context_window = payload.get("context_window", [])
+    context_strategy = payload.get("context_strategy", "sliding")
     if requested_workdir is not None:
         metadata["ignored_workdir"] = str(requested_workdir)
 
@@ -129,17 +131,22 @@ async def webhook(request: Request, authorization: Optional[str] = Header(defaul
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Invalid policy: {e}")
 
-    job = JobSpec(
-        goal=goal,
-        source=JobSource(type="webhook", meta={"remote": request.client.host if request.client else None}),
-        steps=steps,
-        policy=policy,
-        project_id=project_id,
-        callback_url=callback_url,
-        workdir=".",
-        tags=tags,
-        metadata=metadata,
-    )
+    try:
+        job = JobSpec(
+            goal=goal,
+            source=JobSource(type="webhook", meta={"remote": request.client.host if request.client else None}),
+            steps=steps,
+            policy=policy,
+            project_id=project_id,
+            callback_url=callback_url,
+            workdir=".",
+            context_window=context_window,
+            context_strategy=context_strategy,
+            tags=tags,
+            metadata=metadata,
+        )
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Invalid job: {e}")
 
     try:
         enqueue_state = "awaiting_approval" if job.policy.requires_approval else "pending"

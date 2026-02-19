@@ -48,6 +48,8 @@ def _make_ctx(
         max_input_artifacts_files=max_files,
         max_input_artifact_chars=max_file_chars,
         max_input_artifacts_chars=max_total_chars,
+        context_window=[{"role": "user", "content": "history message"}],
+        context_strategy="sliding",
     )
 
 
@@ -116,6 +118,20 @@ class PromptBuilderTests(unittest.TestCase):
             ctx = _make_ctx(job_dir=job_dir, step=step)
             built = BaseWorker().build_full_prompt(ctx)
             self.assertIn("[invalid_path]", built)
+
+    def test_prompt_builder_includes_context_window(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            job_dir = Path(td)
+            step = StepSpec(
+                step_id="05_impl",
+                agent="codex",
+                role="implementer",
+                prompt="do work",
+            )
+            ctx = _make_ctx(job_dir=job_dir, step=step)
+            built = BaseWorker().build_full_prompt(ctx)
+            self.assertIn("## Conversation context (sliding)", built)
+            self.assertIn("history message", built)
 
 
 if __name__ == "__main__":

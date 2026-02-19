@@ -39,13 +39,15 @@ def _test_policy() -> ExecutionPolicy:
 @unittest.skipIf(validate_json is None, "jsonschema is not installed")
 class ContractTests(unittest.TestCase):
     def test_job_schema_validation_for_model_dump(self) -> None:
-        step = StepSpec(step_id="step01", agent="opencode", role="planner", prompt="plan")
+        step = StepSpec(step_id="step01", agent="opencode", role="planner", prompt="plan", on_failure="ask_human")
         job = JobSpec(
             job_id="job-test-0001",
             goal="validate job schema",
             workdir=".",
             steps=[step],
             policy=PolicySpec(requires_approval=True),
+            context_window=[{"role": "user", "content": "hello"}],
+            context_strategy="sliding",
         )
         validate_json(job.model_dump(), _job_schema())
 
