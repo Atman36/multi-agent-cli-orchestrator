@@ -10,7 +10,7 @@ from dotenv import load_dotenv
 from orchestrator.config import Settings
 from orchestrator.logging_utils import setup_logging
 from orchestrator.models import JobSpec, JobSource, default_pipeline, StepSpec, PolicySpec
-from fsqueue.file_queue import FileQueue
+from fsqueue.file_queue import DuplicateJobError, FileQueue
 
 
 def _read_json(path: Path) -> dict:
@@ -49,7 +49,11 @@ def cmd_submit(args: argparse.Namespace) -> int:
             metadata=dict(job_obj.get("metadata") or {}),
         )
 
-    q.enqueue(job.model_dump())
+    try:
+        q.enqueue(job.model_dump())
+    except DuplicateJobError as e:
+        print(f"ERROR: {e}", file=sys.stderr)
+        return 2
     print(job.job_id)
     return 0
 

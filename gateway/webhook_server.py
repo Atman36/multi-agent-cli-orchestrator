@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hmac
+import json
 import logging
 from pathlib import Path
 from typing import Any, Optional
@@ -13,7 +14,7 @@ import uvicorn
 from orchestrator.config import Settings
 from orchestrator.logging_utils import setup_logging
 from orchestrator.models import JobSpec, JobSource, default_pipeline, StepSpec, PolicySpec
-from fsqueue.file_queue import FileQueue
+from fsqueue.file_queue import DuplicateJobError, FileQueue
 
 log = logging.getLogger("webhook")
 
@@ -30,6 +31,16 @@ app = FastAPI(title="Multi-Agent CLI Orchestrator", version="0.1.0")
 
 settings: Settings | None = None
 queue: FileQueue | None = None
+
+
+def _read_json_if_exists(path: Path) -> dict[str, Any] | None:
+    if not path.exists():
+        return None
+    try:
+        obj = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return None
+    return obj if isinstance(obj, dict) else None
 
 
 @app.on_event("startup")
@@ -60,7 +71,15 @@ async def webhook(request: Request, authorization: Optional[str] = Header(defaul
     if not constant_time_equal(token, settings.webhook_token):
         raise HTTPException(status_code=403, detail="Invalid token")
 
-    payload = await request.json()
+    body = await request.body()
+    if len(body) > settings.max_webhook_body_bytes:
+        raise HTTPException(status_code=413, detail=f"Payload too large (>{settings.max_webhook_body_bytes} bytes)")
+
+    try:
+        payload = json.loads(body.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        raise HTTPException(status_code=400, detail="Invalid JSON payload")
+
     if not isinstance(payload, dict):
         raise HTTPException(status_code=400, detail="Payload must be a JSON object")
 
@@ -97,7 +116,10 @@ async def webhook(request: Request, authorization: Optional[str] = Header(defaul
         metadata=metadata,
     )
 
-    job_id = queue.enqueue(job.model_dump())
+    try:
+        job_id = queue.enqueue(job.model_dump())
+    except DuplicateJobError as e:
+        raise HTTPException(status_code=409, detail=str(e))
     return JSONResponse(
         {
             "status": "queued",
@@ -115,19 +137,14 @@ def job_status(job_id: str) -> dict[str, Any]:
     state_path = job_dir / "state.json"
     result_path = job_dir / "result.json"
 
-    state = None
-    result = None
-
-    if state_path.exists():
-        state = state_path.read_text(encoding="utf-8")
-    if result_path.exists():
-        result = result_path.read_text(encoding="utf-8")
+    state = _read_json_if_exists(state_path)
+    result = _read_json_if_exists(result_path)
 
     return {
         "job_id": job_id,
-        "state_json": state,
-        "result_json": result,
-        "job_dir": str(job_dir.resolve()),
+        "status": (state or {}).get("status", "queued"),
+        "state": state,
+        "result": result,
     }
 
 

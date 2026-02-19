@@ -64,6 +64,10 @@ async def run_forever_async() -> None:
     log.info("Runner started. enable_real_cli=%s sandbox=%s", settings.enable_real_cli, settings.sandbox)
 
     while True:
+        reclaimed = q.reclaim_stale_running(settings.runner_reclaim_after_sec)
+        if reclaimed:
+            log.warning("Reclaimed %s stale running job(s) back to pending", reclaimed)
+
         try:
             claimed = q.claim()
         except QueueEmpty:

@@ -13,7 +13,7 @@ from dotenv import load_dotenv
 from orchestrator.config import Settings
 from orchestrator.logging_utils import setup_logging
 from orchestrator.models import JobSpec, default_pipeline, JobSource, StepSpec, PolicySpec
-from fsqueue.file_queue import FileQueue
+from fsqueue.file_queue import DuplicateJobError, FileQueue
 
 log = logging.getLogger("scheduler")
 
@@ -96,8 +96,11 @@ class CronScheduler:
                     tags=list(payload.get("tags") or []),
                     metadata=dict(payload.get("metadata") or {}),
                 )
-                self.queue.enqueue(job.model_dump())
-                log.info("Enqueued scheduled job %s (job_id=%s)", sched_id, job.job_id)
+                try:
+                    self.queue.enqueue(job.model_dump())
+                    log.info("Enqueued scheduled job %s (job_id=%s)", sched_id, job.job_id)
+                except DuplicateJobError:
+                    log.warning("Skipping duplicate scheduled job %s (job_id=%s)", sched_id, job.job_id)
 
                 # Compute next run
                 self.next_runs[sched_id] = self._compute_next(expr, now)

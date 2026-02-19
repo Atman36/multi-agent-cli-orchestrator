@@ -42,6 +42,7 @@ class Settings:
 
     runner_poll_interval_sec: int
     runner_max_idle_sec: int
+    runner_reclaim_after_sec: int
 
     enable_real_cli: bool
 
@@ -55,6 +56,7 @@ class Settings:
     env_allowlist: set[str]
     sensitive_env_vars: set[str]
     max_input_artifacts_chars: int
+    max_webhook_body_bytes: int
 
     log_level: str
 
@@ -68,6 +70,7 @@ class Settings:
 
         runner_poll_interval_sec = _env_int("RUNNER_POLL_INTERVAL_SEC", 1)
         runner_max_idle_sec = _env_int("RUNNER_MAX_IDLE_SEC", 120)
+        runner_reclaim_after_sec = _env_int("RUNNER_RECLAIM_AFTER_SEC", 600)
 
         enable_real_cli = _env_bool("ENABLE_REAL_CLI", False)
 
@@ -90,6 +93,7 @@ class Settings:
             "ANTHROPIC_API_KEY,OPENAI_API_KEY",
         )
         max_input_artifacts_chars = _env_int("MAX_INPUT_ARTIFACTS_CHARS", 40000)
+        max_webhook_body_bytes = _env_int("MAX_WEBHOOK_BODY_BYTES", 262144)
         log_level = _env_str("LOG_LEVEL", "INFO")
 
         # Ensure directories exist
@@ -103,6 +107,7 @@ class Settings:
             webhook_token=webhook_token,
             runner_poll_interval_sec=runner_poll_interval_sec,
             runner_max_idle_sec=runner_max_idle_sec,
+            runner_reclaim_after_sec=runner_reclaim_after_sec,
             enable_real_cli=enable_real_cli,
             sandbox=sandbox,
             sandbox_wrapper=sandbox_wrapper,
@@ -112,5 +117,6 @@ class Settings:
             env_allowlist=env_allowlist,
             sensitive_env_vars=sensitive_env_vars,
             max_input_artifacts_chars=max_input_artifacts_chars,
+            max_webhook_body_bytes=max_webhook_body_bytes,
             log_level=log_level,
         )

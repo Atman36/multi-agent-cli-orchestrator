@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import os
 import signal
@@ -32,6 +33,31 @@ async def _read_stream(stream: asyncio.StreamReader, sink: list[str], on_line=No
         sink.append(text)
         if on_line:
             on_line(text)
+
+
+async def _terminate_process_group(proc: asyncio.subprocess.Process, *, grace_sec: int = 2) -> None:
+    if proc.returncode is not None:
+        return
+
+    try:
+        os.killpg(proc.pid, signal.SIGTERM)
+    except Exception:
+        with contextlib.suppress(ProcessLookupError):
+            proc.send_signal(signal.SIGTERM)
+
+    try:
+        await asyncio.wait_for(proc.wait(), timeout=grace_sec)
+        return
+    except asyncio.TimeoutError:
+        pass
+
+    try:
+        os.killpg(proc.pid, signal.SIGKILL)
+    except Exception:
+        with contextlib.suppress(ProcessLookupError):
+            proc.kill()
+    with contextlib.suppress(ProcessLookupError):
+        await proc.wait()
 
 
 async def run_command(
@@ -78,6 +104,7 @@ async def run_command(
         env=safe_env,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
+        start_new_session=True,
     )
 
     stdout_lines: list[str] = []
@@ -103,16 +130,7 @@ async def run_command(
             await asyncio.sleep(1)
             if time.time() - last_output > idle_timeout_sec:
                 killed_by_watchdog = True
-                try:
-                    proc.send_signal(signal.SIGTERM)
-                except ProcessLookupError:
-                    break
-                await asyncio.sleep(2)
-                if proc.returncode is None:
-                    try:
-                        proc.kill()
-                    except ProcessLookupError:
-                        pass
+                await _terminate_process_group(proc, grace_sec=2)
                 break
 
     wd = asyncio.create_task(_watchdog())
@@ -120,17 +138,7 @@ async def run_command(
     try:
         await asyncio.wait_for(proc.wait(), timeout=timeout_sec)
     except asyncio.TimeoutError:
-        try:
-            proc.send_signal(signal.SIGTERM)
-        except ProcessLookupError:
-            pass
-        await asyncio.sleep(2)
-        if proc.returncode is None:
-            try:
-                proc.kill()
-            except ProcessLookupError:
-                pass
-        await proc.wait()
+        await _terminate_process_group(proc, grace_sec=2)
 
     await t_out
     await t_err
