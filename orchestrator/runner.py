@@ -15,7 +15,7 @@ from orchestrator.artifact_store import ArtifactStore
 from orchestrator.budget import BudgetLimitExceeded, BudgetTracker
 from orchestrator.config import Settings
 from orchestrator.logging_utils import setup_logging
-from orchestrator.models import JobSpec, JobResult, StepResult, ArtifactPaths, ErrorInfo, utc_now_iso
+from orchestrator.models import JobSpec, JobResult, StepResult, StepSpec, ArtifactPaths, ErrorInfo, utc_now_iso
 from orchestrator.policy import build_policy_from_env, PolicyError, assert_startup_policy_safe
 from orchestrator.preflight import assert_real_cli_ready, PreflightError
 from orchestrator.retention import run_retention
@@ -153,6 +153,29 @@ def _append_step_to_context(messages: list[dict[str, str]], *, step_prompt: str,
     return out
 
 
+def _latest_successful_step_id(step_results: list[StepResult]) -> str | None:
+    for sr in reversed(step_results):
+        if sr.status == "success":
+            return sr.step_id
+    return None
+
+
+def _resolve_effective_step(
+    step: StepSpec,
+    *,
+    artifact_handoff: str,
+    previous_success_step_id: str | None,
+) -> StepSpec:
+    if artifact_handoff == "manual":
+        return step
+    if artifact_handoff == "workspace_first":
+        return step.model_copy(update={"input_artifacts": [], "apply_patches_from": []})
+    if artifact_handoff == "patch_first":
+        input_artifacts = [f"steps/{previous_success_step_id}/patch.diff"] if previous_success_step_id else []
+        return step.model_copy(update={"input_artifacts": input_artifacts, "apply_patches_from": []})
+    return step
+
+
 async def _fire_callback(callback_url: str, result_obj: dict) -> None:
     """POST job result to callback_url. Best-effort, never raises."""
     parsed = urlparse(callback_url)
@@ -279,6 +302,7 @@ async def run_forever_async() -> None:
                 _normalize_context_window(job.context_window),
                 context_strategy,
             )
+            artifact_handoff = job.artifact_handoff
             store.write_context(
                 job.job_id,
                 {
@@ -319,6 +343,11 @@ async def run_forever_async() -> None:
             step_idx = 0
             while step_idx < len(job.steps):
                 step = job.steps[step_idx]
+                effective_step = _resolve_effective_step(
+                    step,
+                    artifact_handoff=artifact_handoff,
+                    previous_success_step_id=_latest_successful_step_id(step_results),
+                )
                 if overall_error is not None:
                     break
                 step_id = step.step_id
@@ -338,6 +367,13 @@ async def run_forever_async() -> None:
                 attempt = 0
                 last_result: StepResult | None = None
 
+                if artifact_handoff != "manual" and (step.input_artifacts or step.apply_patches_from):
+                    log.info(
+                        "Step %s manual artifact fields ignored by artifact_handoff=%s",
+                        step.step_id,
+                        artifact_handoff,
+                    )
+
                 while attempt <= step.max_retries:
                     attempt += 1
 
@@ -352,7 +388,7 @@ async def run_forever_async() -> None:
 
                     ctx = StepContext(
                         job=job,
-                        step=step,
+                        step=effective_step,
                         job_dir=job_dir,
                         step_dir=step_dir,
                         enable_real_cli=settings.enable_real_cli,

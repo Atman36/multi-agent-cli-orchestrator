@@ -164,10 +164,14 @@ Copy `.env.example` to `.env` and adjust as needed.
 |---|---|---|
 | `ENABLE_REAL_CLI` | `0` | `1` to execute real CLI agents |
 | `WEBHOOK_TOKEN` | `dev-token` | Bearer token for `POST /webhook` |
+| `WEBHOOK_TOKENS` | *(empty)* | Optional token map (`token=project1|project2`, `*` for all projects) |
+| `WEBHOOK_RATE_LIMIT_WINDOW_SEC` | `60` | Webhook rate-limit window (seconds) |
+| `WEBHOOK_RATE_LIMIT_MAX_REQUESTS` | `30` | Max requests per `(token, client_ip)` within window (`0` disables) |
 | `QUEUE_ROOT` | `var/queue` | Filesystem queue root |
 | `ARTIFACTS_ROOT` | `artifacts` | Artifacts root |
 | `WORKSPACES_ROOT` | `workspaces` | Job workspace root |
 | `PROJECT_ALIASES` | *(empty)* | Maps `project_id` → absolute repo path |
+| `DEFAULT_ARTIFACT_HANDOFF` | `manual` | Default handoff mode (`manual`, `patch_first`, `workspace_first`) for webhook-created jobs |
 | `ALLOWED_BINARIES` | `opencode,claude,codex,git,python` | Subprocess allowlist |
 | `ENV_ALLOWLIST` | `ANTHROPIC_API_KEY,OPENAI_API_KEY,PATH,HOME` | Env vars passed to subprocesses |
 | `RUNNER_MAX_ATTEMPTS_PER_STEP` | `3` | Retry limit per step |

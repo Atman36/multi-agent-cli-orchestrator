@@ -27,6 +27,7 @@ class WebhookServerTests(unittest.TestCase):
             workspaces_root = Path(td) / "workspaces"
             env = {
                 "WEBHOOK_TOKEN": "test-token",
+                "WEBHOOK_TOKENS": "",
                 "QUEUE_ROOT": str(queue_root),
                 "ARTIFACTS_ROOT": str(artifacts_root),
                 "WORKSPACES_ROOT": str(workspaces_root),
@@ -35,6 +36,7 @@ class WebhookServerTests(unittest.TestCase):
             with patch.dict(os.environ, env, clear=False):
                 webhook_server.settings = None
                 webhook_server.queue = None
+                webhook_server.rate_limiter = None
                 with TestClient(webhook_server.app) as client:
                     payload = {"goal": "x" * 300}
                     resp = client.post(
@@ -51,6 +53,7 @@ class WebhookServerTests(unittest.TestCase):
             workspaces_root = Path(td) / "workspaces"
             env = {
                 "WEBHOOK_TOKEN": "test-token",
+                "WEBHOOK_TOKENS": "",
                 "QUEUE_ROOT": str(queue_root),
                 "ARTIFACTS_ROOT": str(artifacts_root),
                 "WORKSPACES_ROOT": str(workspaces_root),
@@ -59,6 +62,7 @@ class WebhookServerTests(unittest.TestCase):
             with patch.dict(os.environ, env, clear=False):
                 webhook_server.settings = None
                 webhook_server.queue = None
+                webhook_server.rate_limiter = None
                 with TestClient(webhook_server.app) as client:
                     create = client.post(
                         "/webhook",
@@ -96,6 +100,7 @@ class WebhookServerTests(unittest.TestCase):
 
             env = {
                 "WEBHOOK_TOKEN": "test-token",
+                "WEBHOOK_TOKENS": "",
                 "QUEUE_ROOT": str(queue_root),
                 "ARTIFACTS_ROOT": str(artifacts_root),
                 "WORKSPACES_ROOT": str(workspaces_root),
@@ -104,6 +109,7 @@ class WebhookServerTests(unittest.TestCase):
             with patch.dict(os.environ, env, clear=False):
                 webhook_server.settings = None
                 webhook_server.queue = None
+                webhook_server.rate_limiter = None
                 with TestClient(webhook_server.app) as client:
                     resp = client.post(
                         "/webhook",
@@ -125,6 +131,7 @@ class WebhookServerTests(unittest.TestCase):
             workspaces_root = Path(td) / "workspaces"
             env = {
                 "WEBHOOK_TOKEN": "test-token",
+                "WEBHOOK_TOKENS": "",
                 "QUEUE_ROOT": str(queue_root),
                 "ARTIFACTS_ROOT": str(artifacts_root),
                 "WORKSPACES_ROOT": str(workspaces_root),
@@ -133,6 +140,7 @@ class WebhookServerTests(unittest.TestCase):
             with patch.dict(os.environ, env, clear=False):
                 webhook_server.settings = None
                 webhook_server.queue = None
+                webhook_server.rate_limiter = None
                 with TestClient(webhook_server.app) as client:
                     resp = client.post(
                         "/webhook",
@@ -148,6 +156,7 @@ class WebhookServerTests(unittest.TestCase):
             workspaces_root = Path(td) / "workspaces"
             env = {
                 "WEBHOOK_TOKEN": "test-token",
+                "WEBHOOK_TOKENS": "",
                 "QUEUE_ROOT": str(queue_root),
                 "ARTIFACTS_ROOT": str(artifacts_root),
                 "WORKSPACES_ROOT": str(workspaces_root),
@@ -155,6 +164,7 @@ class WebhookServerTests(unittest.TestCase):
             with patch.dict(os.environ, env, clear=False):
                 webhook_server.settings = None
                 webhook_server.queue = None
+                webhook_server.rate_limiter = None
                 with TestClient(webhook_server.app) as client:
                     resp = client.post(
                         "/webhook",
@@ -175,6 +185,7 @@ class WebhookServerTests(unittest.TestCase):
             workspaces_root = Path(td) / "workspaces"
             env = {
                 "WEBHOOK_TOKEN": "test-token",
+                "WEBHOOK_TOKENS": "",
                 "QUEUE_ROOT": str(queue_root),
                 "ARTIFACTS_ROOT": str(artifacts_root),
                 "WORKSPACES_ROOT": str(workspaces_root),
@@ -182,6 +193,7 @@ class WebhookServerTests(unittest.TestCase):
             with patch.dict(os.environ, env, clear=False):
                 webhook_server.settings = None
                 webhook_server.queue = None
+                webhook_server.rate_limiter = None
                 with TestClient(webhook_server.app) as client:
                     resp = client.post(
                         "/webhook",
@@ -199,6 +211,148 @@ class WebhookServerTests(unittest.TestCase):
                     self.assertEqual(obj["context_strategy"], "sliding")
                     self.assertEqual(obj["context_window"][0]["content"], "hello")
 
+    def test_webhook_scoped_tokens_enforce_project_access(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            queue_root = Path(td) / "queue"
+            artifacts_root = Path(td) / "artifacts"
+            workspaces_root = Path(td) / "workspaces"
+            demo_repo = Path(td) / "demo"
+            tools_repo = Path(td) / "tools"
+            demo_repo.mkdir(parents=True, exist_ok=True)
+            tools_repo.mkdir(parents=True, exist_ok=True)
+
+            env = {
+                "WEBHOOK_TOKENS": "token-demo=demo,token-all=*",
+                "QUEUE_ROOT": str(queue_root),
+                "ARTIFACTS_ROOT": str(artifacts_root),
+                "WORKSPACES_ROOT": str(workspaces_root),
+                "PROJECT_ALIASES": f"demo={demo_repo},tools={tools_repo}",
+            }
+            with patch.dict(os.environ, env, clear=False):
+                webhook_server.settings = None
+                webhook_server.queue = None
+                webhook_server.rate_limiter = None
+                with TestClient(webhook_server.app) as client:
+                    ok = client.post(
+                        "/webhook",
+                        headers={"Authorization": "Bearer token-demo"},
+                        json={"goal": "run tests", "project_id": "demo"},
+                    )
+                    self.assertEqual(ok.status_code, 200)
+
+                    denied = client.post(
+                        "/webhook",
+                        headers={"Authorization": "Bearer token-demo"},
+                        json={"goal": "run tests", "project_id": "tools"},
+                    )
+                    self.assertEqual(denied.status_code, 403)
+
+                    missing_project = client.post(
+                        "/webhook",
+                        headers={"Authorization": "Bearer token-demo"},
+                        json={"goal": "run tests"},
+                    )
+                    self.assertEqual(missing_project.status_code, 403)
+
+                    wildcard = client.post(
+                        "/webhook",
+                        headers={"Authorization": "Bearer token-all"},
+                        json={"goal": "run tests", "project_id": "tools"},
+                    )
+                    self.assertEqual(wildcard.status_code, 200)
+
+    def test_webhook_rate_limit_returns_429(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            queue_root = Path(td) / "queue"
+            artifacts_root = Path(td) / "artifacts"
+            workspaces_root = Path(td) / "workspaces"
+            env = {
+                "WEBHOOK_TOKEN": "test-token",
+                "WEBHOOK_TOKENS": "",
+                "QUEUE_ROOT": str(queue_root),
+                "ARTIFACTS_ROOT": str(artifacts_root),
+                "WORKSPACES_ROOT": str(workspaces_root),
+                "WEBHOOK_RATE_LIMIT_WINDOW_SEC": "60",
+                "WEBHOOK_RATE_LIMIT_MAX_REQUESTS": "1",
+            }
+            with patch.dict(os.environ, env, clear=False):
+                webhook_server.settings = None
+                webhook_server.queue = None
+                webhook_server.rate_limiter = None
+                with TestClient(webhook_server.app) as client:
+                    first = client.post(
+                        "/webhook",
+                        headers={"Authorization": "Bearer test-token"},
+                        json={"goal": "run tests"},
+                    )
+                    self.assertEqual(first.status_code, 200)
+
+                    second = client.post(
+                        "/webhook",
+                        headers={"Authorization": "Bearer test-token"},
+                        json={"goal": "run tests again"},
+                    )
+                    self.assertEqual(second.status_code, 429)
+                    self.assertIn("Retry-After", second.headers)
+
+    def test_webhook_uses_default_artifact_handoff_from_env(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            queue_root = Path(td) / "queue"
+            artifacts_root = Path(td) / "artifacts"
+            workspaces_root = Path(td) / "workspaces"
+            env = {
+                "WEBHOOK_TOKEN": "test-token",
+                "WEBHOOK_TOKENS": "",
+                "QUEUE_ROOT": str(queue_root),
+                "ARTIFACTS_ROOT": str(artifacts_root),
+                "WORKSPACES_ROOT": str(workspaces_root),
+                "DEFAULT_ARTIFACT_HANDOFF": "patch_first",
+            }
+            with patch.dict(os.environ, env, clear=False):
+                webhook_server.settings = None
+                webhook_server.queue = None
+                webhook_server.rate_limiter = None
+                with TestClient(webhook_server.app) as client:
+                    resp = client.post(
+                        "/webhook",
+                        headers={"Authorization": "Bearer test-token"},
+                        json={"goal": "run tests"},
+                    )
+                    self.assertEqual(resp.status_code, 200)
+                    pending_files = list((queue_root / "pending").glob("*.json"))
+                    self.assertEqual(len(pending_files), 1)
+                    job_obj = json.loads(pending_files[0].read_text(encoding="utf-8"))
+                    self.assertEqual(job_obj["artifact_handoff"], "patch_first")
+
+    def test_webhook_payload_can_override_artifact_handoff(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            queue_root = Path(td) / "queue"
+            artifacts_root = Path(td) / "artifacts"
+            workspaces_root = Path(td) / "workspaces"
+            env = {
+                "WEBHOOK_TOKEN": "test-token",
+                "WEBHOOK_TOKENS": "",
+                "QUEUE_ROOT": str(queue_root),
+                "ARTIFACTS_ROOT": str(artifacts_root),
+                "WORKSPACES_ROOT": str(workspaces_root),
+                "DEFAULT_ARTIFACT_HANDOFF": "manual",
+            }
+            with patch.dict(os.environ, env, clear=False):
+                webhook_server.settings = None
+                webhook_server.queue = None
+                webhook_server.rate_limiter = None
+                with TestClient(webhook_server.app) as client:
+                    resp = client.post(
+                        "/webhook",
+                        headers={"Authorization": "Bearer test-token"},
+                        json={"goal": "run tests", "artifact_handoff": "workspace_first"},
+                    )
+                    self.assertEqual(resp.status_code, 200)
+                    pending_files = list((queue_root / "pending").glob("*.json"))
+                    self.assertEqual(len(pending_files), 1)
+                    job_obj = json.loads(pending_files[0].read_text(encoding="utf-8"))
+                    self.assertEqual(job_obj["artifact_handoff"], "workspace_first")
+
     def test_metrics_endpoint_returns_prometheus_text(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             queue_root = Path(td) / "queue"
@@ -206,6 +360,7 @@ class WebhookServerTests(unittest.TestCase):
             workspaces_root = Path(td) / "workspaces"
             env = {
                 "WEBHOOK_TOKEN": "test-token",
+                "WEBHOOK_TOKENS": "",
                 "QUEUE_ROOT": str(queue_root),
                 "ARTIFACTS_ROOT": str(artifacts_root),
                 "WORKSPACES_ROOT": str(workspaces_root),
@@ -213,6 +368,7 @@ class WebhookServerTests(unittest.TestCase):
             with patch.dict(os.environ, env, clear=False):
                 webhook_server.settings = None
                 webhook_server.queue = None
+                webhook_server.rate_limiter = None
                 with TestClient(webhook_server.app) as client:
                     resp = client.get("/metrics")
                     self.assertEqual(resp.status_code, 200)

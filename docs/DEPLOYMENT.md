@@ -49,6 +49,10 @@ Nginx sample config: `deploy/nginx/orchestrator.conf`
 - `client_max_body_size` limit
 - restricted access to `/metrics`
 
+For multi-tenant webhook auth, configure scoped tokens via `WEBHOOK_TOKENS`
+(for example `token-a=project1|project2,token-b=*`) and keep `PROJECT_ALIASES`
+in sync with allowed project IDs.
+
 ## Log rotation
 
 Sample logrotate policy: `deploy/logrotate/orchestrator`

@@ -77,6 +77,35 @@ def _env_str_map(name: str, default: str = "") -> dict[str, str]:
     return out
 
 
+def _env_token_scopes(name: str, default: str = "") -> dict[str, set[str]]:
+    raw = os.getenv(name, default).strip()
+    out: dict[str, set[str]] = {}
+    if not raw:
+        return out
+    for part in raw.split(","):
+        item = part.strip()
+        if not item or "=" not in item:
+            continue
+        token, scopes_raw = item.split("=", 1)
+        token = token.strip()
+        if not token:
+            continue
+        scopes = {scope.strip() for scope in scopes_raw.split("|") if scope.strip()}
+        if not scopes:
+            continue
+        if "*" in scopes:
+            scopes = {"*"}
+        out[token] = scopes
+    return out
+
+
+def _normalize_artifact_handoff(value: str) -> str:
+    mode = value.strip().lower()
+    if mode in {"manual", "patch_first", "workspace_first"}:
+        return mode
+    return "manual"
+
+
 @dataclass(frozen=True)
 class Settings:
     queue_root: Path
@@ -86,6 +115,10 @@ class Settings:
     project_aliases: dict[str, Path]
 
     webhook_token: str
+    webhook_tokens: dict[str, set[str]]
+    webhook_rate_limit_window_sec: int
+    webhook_rate_limit_max_requests: int
+    default_artifact_handoff: str
 
     runner_poll_interval_sec: int
     runner_max_idle_sec: int
@@ -128,6 +161,10 @@ class Settings:
         project_aliases = _env_path_map("PROJECT_ALIASES", "")
 
         webhook_token = _env_str("WEBHOOK_TOKEN", "dev-token")
+        webhook_tokens = _env_token_scopes("WEBHOOK_TOKENS", "")
+        webhook_rate_limit_window_sec = max(1, _env_int("WEBHOOK_RATE_LIMIT_WINDOW_SEC", 60))
+        webhook_rate_limit_max_requests = max(0, _env_int("WEBHOOK_RATE_LIMIT_MAX_REQUESTS", 30))
+        default_artifact_handoff = _normalize_artifact_handoff(_env_str("DEFAULT_ARTIFACT_HANDOFF", "manual"))
 
         runner_poll_interval_sec = _env_int("RUNNER_POLL_INTERVAL_SEC", 1)
         runner_max_idle_sec = _env_int("RUNNER_MAX_IDLE_SEC", 120)
@@ -183,6 +220,10 @@ class Settings:
             state_db_path=state_db_path,
             project_aliases=project_aliases,
             webhook_token=webhook_token,
+            webhook_tokens=webhook_tokens,
+            webhook_rate_limit_window_sec=webhook_rate_limit_window_sec,
+            webhook_rate_limit_max_requests=webhook_rate_limit_max_requests,
+            default_artifact_handoff=default_artifact_handoff,
             runner_poll_interval_sec=runner_poll_interval_sec,
             runner_max_idle_sec=runner_max_idle_sec,
             runner_reclaim_after_sec=runner_reclaim_after_sec,

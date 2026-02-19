@@ -178,6 +178,12 @@
       "enum": ["full", "summarize", "sliding"],
       "default": "sliding"
     },
+    "artifact_handoff": {
+      "type": "string",
+      "enum": ["manual", "patch_first", "workspace_first"],
+      "default": "manual",
+      "description": "Step-to-step artifact mode: manual, patch_first, or workspace_first"
+    },
     "policy": {
       "type": "object",
       "additionalProperties": false,

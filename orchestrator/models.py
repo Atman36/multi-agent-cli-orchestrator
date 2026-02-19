@@ -11,6 +11,7 @@ from pydantic import BaseModel, Field, field_validator
 AGENT = str
 NETWORK_POLICY = Literal["deny", "allow"]
 SECRETS_CHECK = Literal["passed", "failed"]
+ARTIFACT_HANDOFF = Literal["manual", "patch_first", "workspace_first"]
 
 
 def utc_now_iso() -> str:
@@ -86,6 +87,15 @@ class JobSpec(BaseModel):
     context_strategy: Literal["full", "summarize", "sliding"] = Field(
         default="sliding",
         description="How context_window is maintained between steps",
+    )
+    artifact_handoff: ARTIFACT_HANDOFF = Field(
+        default="manual",
+        description=(
+            "How step-to-step artifacts are shared: "
+            "'manual' uses explicit step.input_artifacts/apply_patches_from, "
+            "'patch_first' exposes only previous successful patch.diff, "
+            "'workspace_first' relies on shared workspace without prompt artifacts"
+        ),
     )
 
     tags: list[str] = Field(default_factory=list)

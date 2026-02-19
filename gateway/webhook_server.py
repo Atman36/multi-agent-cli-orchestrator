@@ -1,10 +1,15 @@
 from __future__ import annotations
 
+from collections import deque
+from dataclasses import dataclass
 import hmac
 import json
 import logging
+import math
 from pathlib import Path
-from typing import Any, Optional
+from threading import Lock
+import time
+from typing import Any, Callable, Optional
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, Header, HTTPException, Request
@@ -28,10 +33,61 @@ def constant_time_equal(a: str, b: str) -> bool:
     return hmac.compare_digest(a.encode("utf-8"), b.encode("utf-8"))
 
 
+@dataclass(frozen=True)
+class RateLimitDecision:
+    allowed: bool
+    retry_after_sec: int = 0
+
+
+class InMemoryRateLimiter:
+    def __init__(self, *, window_sec: int, max_requests: int, now_fn: Callable[[], float] | None = None):
+        self.window_sec = max(1, int(window_sec))
+        self.max_requests = max(1, int(max_requests))
+        self._now_fn = now_fn or time.monotonic
+        self._lock = Lock()
+        self._buckets: dict[str, deque[float]] = {}
+
+    def check(self, key: str) -> RateLimitDecision:
+        now = self._now_fn()
+        cutoff = now - self.window_sec
+        with self._lock:
+            bucket = self._buckets.setdefault(key, deque())
+            while bucket and bucket[0] <= cutoff:
+                bucket.popleft()
+            if len(bucket) >= self.max_requests:
+                retry_after = max(1, int(math.ceil((bucket[0] + self.window_sec) - now)))
+                return RateLimitDecision(allowed=False, retry_after_sec=retry_after)
+            bucket.append(now)
+            return RateLimitDecision(allowed=True, retry_after_sec=0)
+
+
+def _extract_client_ip(request: Request) -> str:
+    forwarded_for = request.headers.get("x-forwarded-for", "").strip()
+    if forwarded_for:
+        first_hop = forwarded_for.split(",", 1)[0].strip()
+        if first_hop:
+            return first_hop
+    if request.client and request.client.host:
+        return request.client.host
+    return "unknown"
+
+
+def _resolve_token_scopes(token: str, cfg: Settings) -> set[str] | None:
+    if cfg.webhook_tokens:
+        for candidate_token, scopes in cfg.webhook_tokens.items():
+            if constant_time_equal(token, candidate_token):
+                return scopes
+        return None
+    if constant_time_equal(token, cfg.webhook_token):
+        return {"*"}
+    return None
+
+
 app = FastAPI(title="Multi-Agent CLI Orchestrator", version="0.1.0")
 
 settings: Settings | None = None
 queue: FileQueue | None = None
+rate_limiter: InMemoryRateLimiter | None = None
 
 
 def _read_json_if_exists(path: Path) -> dict[str, Any] | None:
@@ -46,11 +102,18 @@ def _read_json_if_exists(path: Path) -> dict[str, Any] | None:
 
 @app.on_event("startup")
 def _startup() -> None:
-    global settings, queue
+    global settings, queue, rate_limiter
     load_dotenv()
     settings = Settings.load()
     setup_logging(settings.log_level, json_output=settings.log_json)
     queue = FileQueue(settings.queue_root)
+    if settings.webhook_rate_limit_max_requests > 0:
+        rate_limiter = InMemoryRateLimiter(
+            window_sec=settings.webhook_rate_limit_window_sec,
+            max_requests=settings.webhook_rate_limit_max_requests,
+        )
+    else:
+        rate_limiter = None
     log.info("Webhook server started")
 
 
@@ -76,8 +139,18 @@ async def webhook(request: Request, authorization: Optional[str] = Header(defaul
         raise HTTPException(status_code=401, detail="Missing Authorization: Bearer <token>")
 
     token = authorization.split(" ", 1)[1].strip()
-    if not constant_time_equal(token, settings.webhook_token):
+    token_scopes = _resolve_token_scopes(token, settings)
+    if token_scopes is None:
         raise HTTPException(status_code=403, detail="Invalid token")
+    if rate_limiter is not None:
+        rate_limit_key = f"{token}:{_extract_client_ip(request)}"
+        decision = rate_limiter.check(rate_limit_key)
+        if not decision.allowed:
+            raise HTTPException(
+                status_code=429,
+                detail="Rate limit exceeded",
+                headers={"Retry-After": str(decision.retry_after_sec)},
+            )
 
     body = await request.body()
     if len(body) > settings.max_webhook_body_bytes:
@@ -102,6 +175,11 @@ async def webhook(request: Request, authorization: Optional[str] = Header(defaul
         project_id = None
     if project_id is not None and project_id not in settings.project_aliases:
         raise HTTPException(status_code=400, detail=f"Unknown project_id '{project_id}'")
+    if "*" not in token_scopes:
+        if project_id is None:
+            raise HTTPException(status_code=403, detail="Token requires explicit project_id")
+        if project_id not in token_scopes:
+            raise HTTPException(status_code=403, detail=f"Token is not allowed for project_id '{project_id}'")
 
     callback_url = payload.get("callback_url")
     if callback_url is not None:
@@ -142,6 +220,7 @@ async def webhook(request: Request, authorization: Optional[str] = Header(defaul
             workdir=".",
             context_window=context_window,
             context_strategy=context_strategy,
+            artifact_handoff=str(payload.get("artifact_handoff") or settings.default_artifact_handoff),
             tags=tags,
             metadata=metadata,
         )
