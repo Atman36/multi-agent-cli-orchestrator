@@ -15,6 +15,21 @@ def _is_within(base: Path, target: Path) -> bool:
     return target == base or base in target.parents
 
 
+def _assert_no_symlink_components(base: Path, target: Path) -> None:
+    base_resolved = base.resolve()
+    candidate = target if target.is_absolute() else (base_resolved / target)
+    try:
+        relative = candidate.relative_to(base_resolved)
+    except ValueError as exc:
+        raise WorkspaceError(f"Path escapes WORKSPACES_ROOT: {target}") from exc
+
+    cursor = base_resolved
+    for part in relative.parts:
+        cursor = cursor / part
+        if cursor.exists() and cursor.is_symlink():
+            raise WorkspaceError(f"Refusing symlink path component: {cursor}")
+
+
 def _mkdir_secure(path: Path, mode: int = 0o750) -> None:
     old_umask = os.umask(0o027)
     try:
@@ -26,6 +41,8 @@ def _mkdir_secure(path: Path, mode: int = 0o750) -> None:
 
 def _check_no_symlink_escape(base: Path, target: Path) -> None:
     base_resolved = base.resolve()
+    _assert_no_symlink_components(base_resolved, target)
+
     candidate = target
     if candidate.exists() and candidate.is_symlink():
         raise WorkspaceError(f"Refusing symlink path: {candidate}")
@@ -101,5 +118,16 @@ class WorkspaceManager:
             if proc.returncode == 0:
                 return
             raise WorkspaceError(f"Failed to clone git source: {proc.stderr.strip() or proc.stdout.strip()}")
+
+        for dirpath, dirnames, filenames in os.walk(src, followlinks=False):
+            base = Path(dirpath)
+            for dirname in dirnames:
+                candidate = base / dirname
+                if candidate.is_symlink():
+                    raise WorkspaceError(f"Refusing source with symlink entry: {candidate}")
+            for filename in filenames:
+                candidate = base / filename
+                if candidate.is_symlink():
+                    raise WorkspaceError(f"Refusing source with symlink entry: {candidate}")
 
         shutil.copytree(src, workdir, symlinks=False)

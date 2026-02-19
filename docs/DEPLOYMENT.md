@@ -4,6 +4,7 @@
 
 - `orchestrator-api.service`: webhook API (`gateway.webhook_server`)
 - `orchestrator-runner.service`: job execution (`orchestrator.runner`)
+- `orchestrator-runner@.service`: runner pool template (`orchestrator.runner`)
 - `orchestrator-scheduler.service`: cron schedules (`orchestrator.scheduler`)
 
 Service templates are in `deploy/systemd/`.
@@ -18,6 +19,15 @@ Service templates are in `deploy/systemd/`.
    - `sudo cp deploy/systemd/*.service /etc/systemd/system/`
    - `sudo systemctl daemon-reload`
    - `sudo systemctl enable --now orchestrator-api orchestrator-runner orchestrator-scheduler`
+
+### Runner pool mode (optional)
+
+If you need parallel workers, use the templated unit:
+
+- `sudo systemctl disable --now orchestrator-runner`
+- `sudo systemctl enable --now orchestrator-runner@1 orchestrator-runner@2 orchestrator-runner@3`
+
+Increase/decrease the number of instances based on host CPU and CLI limits.
 
 ## Hardening defaults
 

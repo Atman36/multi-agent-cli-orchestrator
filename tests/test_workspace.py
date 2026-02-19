@@ -34,6 +34,31 @@ class WorkspaceManagerTests(unittest.TestCase):
             with self.assertRaises(WorkspaceError):
                 mgr.resolve_project_alias("unknown")
 
+    def test_prepare_workspace_rejects_symlink_job_dir(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td) / "workspaces"
+            outside = Path(td) / "outside"
+            outside.mkdir(parents=True, exist_ok=True)
+            root.mkdir(parents=True, exist_ok=True)
+            (root / "job_symlink").symlink_to(outside, target_is_directory=True)
+
+            mgr = WorkspaceManager(root, {})
+            with self.assertRaises(WorkspaceError):
+                mgr.prepare_workspace(job_id="job_symlink", source_hint=None)
+
+    def test_prepare_workspace_rejects_source_with_symlink_entry(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td) / "workspaces"
+            src = Path(td) / "src"
+            src.mkdir(parents=True, exist_ok=True)
+            outside_file = Path(td) / "outside.txt"
+            outside_file.write_text("outside", encoding="utf-8")
+            (src / "linked.txt").symlink_to(outside_file)
+
+            mgr = WorkspaceManager(root, {})
+            with self.assertRaises(WorkspaceError):
+                mgr.prepare_workspace(job_id="job12345680", source_hint=src)
+
 
 if __name__ == "__main__":
     unittest.main()

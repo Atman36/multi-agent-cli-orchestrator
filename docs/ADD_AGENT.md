@@ -27,6 +27,25 @@ register_worker(GeminiWorker())
 
 `runner.py` и `orchestrator/models.py` менять не нужно: реестр подхватит новый агент по имени.
 
+### Внешние плагины (entry points)
+
+Можно подключать worker из внешнего Python-пакета без правок ядра.
+
+Пример для `pyproject.toml` внешнего пакета:
+
+```toml
+[project.entry-points."multi_agent_cli_orchestrator.workers"]
+gemini = "acme_workers.gemini:GeminiWorker"
+```
+
+Поддерживаются варианты entry point:
+- класс-наследник `BaseWorker`
+- экземпляр `BaseWorker`
+- callable без аргументов, возвращающий `BaseWorker`
+
+По умолчанию загружается группа `multi_agent_cli_orchestrator.workers`.
+Переопределить группу можно через `WORKER_ENTRYPOINT_GROUP`.
+
 ## 3) Добавьте шаги в job
 
 В `steps[]` используйте `agent="gemini"` и `step_id` вроде `04_docs`.
