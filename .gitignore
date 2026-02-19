@@ -31,4 +31,3 @@ var/state.db
 
 # Internal dev/planning docs (not for public repo)
 docs/DEVELOPMENT_PLAN.md
-docs/FIX_PLAN.md

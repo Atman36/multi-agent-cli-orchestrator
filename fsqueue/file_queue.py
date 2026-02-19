@@ -32,7 +32,8 @@ class FileQueue:
       done/     - completed successfully
       failed/   - failed (final)
 
-    File format: one job per JSON file. Filename starts with <job_id>.
+    File format: one job per JSON file. Filename is <job_id>.json
+    (or <job_id>.<suffix>.json in no-overwrite move collisions).
     """
 
     def __init__(self, root: Path):
@@ -45,9 +46,17 @@ class FileQueue:
         for p in [self.pending, self.running, self.done, self.failed, self.awaiting_approval]:
             p.mkdir(parents=True, exist_ok=True)
 
+    def _find_job_files(self, folder: Path, job_id: str) -> list[Path]:
+        files: list[Path] = []
+        exact = folder / f"{job_id}.json"
+        if exact.exists():
+            files.append(exact)
+        files.extend(folder.glob(f"{job_id}.*.json"))
+        return sorted(files, key=lambda p: p.stat().st_mtime)
+
     def _job_exists_anywhere(self, job_id: str) -> bool:
         for folder in [self.pending, self.running, self.done, self.failed, self.awaiting_approval]:
-            if any(folder.glob(f"{job_id}*.json")):
+            if self._find_job_files(folder, job_id):
                 return True
         return False
 
@@ -142,7 +151,7 @@ class FileQueue:
         return reclaimed
 
     def _find_job_file(self, folder: Path, job_id: str) -> Path | None:
-        files = sorted(folder.glob(f"{job_id}*.json"), key=lambda p: p.stat().st_mtime)
+        files = self._find_job_files(folder, job_id)
         return files[0] if files else None
 
     def approve(self, job_id: str) -> bool:

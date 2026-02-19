@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 from datetime import datetime, timezone
 from typing import Any
 
@@ -11,9 +12,21 @@ from workers.agent_executor import AgentExecutor, ParsedOutput
 from workers.base import StepContext
 from workers.registry import register_worker
 
+log = logging.getLogger("workers.claude")
+
 
 def utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+CLAUDE_SAFE_TOOLS = {
+    "Read",
+    "Grep",
+    "Glob",
+    "Edit",
+    "Write",
+    "Bash",
+}
 
 
 def _default_allowed_tools(role: str) -> list[str]:
@@ -25,11 +38,30 @@ def _default_allowed_tools(role: str) -> list[str]:
 
 
 def _claude_allowed_tools(ctx: StepContext) -> list[str]:
-    readonly = {"Read", "Grep", "Glob"}
-    requested = ctx.step.allowed_tools or _default_allowed_tools(ctx.step.role)
-    if set(requested).issubset(readonly):
-        return requested
-    return ["Read", "Grep", "Glob"]
+    requested = ctx.step.allowed_tools
+    if requested is None:
+        return _default_allowed_tools(ctx.step.role)
+
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for raw_tool in requested:
+        tool = str(raw_tool).strip()
+        if not tool or tool in seen:
+            continue
+        normalized.append(tool)
+        seen.add(tool)
+
+    if not normalized:
+        return _default_allowed_tools(ctx.step.role)
+
+    unknown = sorted([tool for tool in normalized if tool not in CLAUDE_SAFE_TOOLS])
+    if unknown:
+        log.warning(
+            "Step %s requested unknown Claude tools: %s",
+            ctx.step.step_id,
+            ",".join(unknown),
+        )
+    return normalized
 
 
 def _content_text(value: Any) -> str:

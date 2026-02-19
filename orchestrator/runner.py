@@ -108,6 +108,11 @@ async def run_forever_async() -> None:
             log.info("Real CLI preflight versions: %s", versions)
 
     log.info("Runner started. enable_real_cli=%s sandbox=%s", settings.enable_real_cli, settings.sandbox)
+    if policy.network_policy == "deny" and (not policy.sandbox or not policy.sandbox_wrapper):
+        log.warning(
+            "NETWORK_POLICY=deny is configured without enforceable sandbox wrapper. "
+            "Real CLI jobs requesting network deny will be rejected."
+        )
     next_retention_at = 0.0
 
     while True:
@@ -173,8 +178,21 @@ async def run_forever_async() -> None:
 
             overall_status = "success"
             overall_error: ErrorInfo | None = None
+            job_policy = policy.for_job(
+                job_sandbox=job.policy.sandbox,
+                job_network_policy=job.policy.network,
+                job_allowed_binaries=job.policy.allowed_binaries,
+            )
+            if settings.enable_real_cli:
+                try:
+                    job_policy.assert_real_cli_safe()
+                except PolicyError as e:
+                    overall_status = "failed"
+                    overall_error = ErrorInfo(code="policy", message=str(e))
 
             for step in job.steps:
+                if overall_error is not None:
+                    break
                 step_id = step.step_id
                 store.ensure_step_layout(job.job_id, step_id)
                 step_dir = store.step_dir(job.job_id, step_id)
@@ -210,7 +228,7 @@ async def run_forever_async() -> None:
                         job_dir=job_dir,
                         step_dir=step_dir,
                         enable_real_cli=settings.enable_real_cli,
-                        policy=policy,
+                        policy=job_policy,
                         env_allowlist=settings.env_allowlist,
                         sensitive_env_vars=settings.sensitive_env_vars,
                         sandbox_clear_env=settings.sandbox_clear_env,
