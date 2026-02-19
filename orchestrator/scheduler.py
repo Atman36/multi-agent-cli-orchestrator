@@ -98,7 +98,8 @@ class CronScheduler:
                     metadata=dict(payload.get("metadata") or {}),
                 )
                 try:
-                    self.queue.enqueue(job.model_dump())
+                    enqueue_state = "awaiting_approval" if job.policy.requires_approval else "pending"
+                    self.queue.enqueue(job.model_dump(), state=enqueue_state)
                     log.info("Enqueued scheduled job %s (job_id=%s)", sched_id, job.job_id)
                 except DuplicateJobError:
                     log.warning("Skipping duplicate scheduled job %s (job_id=%s)", sched_id, job.job_id)

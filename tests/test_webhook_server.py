@@ -141,6 +141,33 @@ class WebhookServerTests(unittest.TestCase):
                     )
                     self.assertEqual(resp.status_code, 400)
 
+    def test_webhook_routes_requires_approval_to_awaiting_queue(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            queue_root = Path(td) / "queue"
+            artifacts_root = Path(td) / "artifacts"
+            workspaces_root = Path(td) / "workspaces"
+            env = {
+                "WEBHOOK_TOKEN": "test-token",
+                "QUEUE_ROOT": str(queue_root),
+                "ARTIFACTS_ROOT": str(artifacts_root),
+                "WORKSPACES_ROOT": str(workspaces_root),
+            }
+            with patch.dict(os.environ, env, clear=False):
+                webhook_server.settings = None
+                webhook_server.queue = None
+                with TestClient(webhook_server.app) as client:
+                    resp = client.post(
+                        "/webhook",
+                        headers={"Authorization": "Bearer test-token"},
+                        json={"goal": "run tests", "policy": {"requires_approval": True}},
+                    )
+                    self.assertEqual(resp.status_code, 200)
+                    self.assertEqual(resp.json()["status"], "awaiting_approval")
+                    awaiting = list((queue_root / "awaiting_approval").glob("*.json"))
+                    pending = list((queue_root / "pending").glob("*.json"))
+                    self.assertEqual(len(awaiting), 1)
+                    self.assertEqual(len(pending), 0)
+
     def test_metrics_endpoint_returns_prometheus_text(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             queue_root = Path(td) / "queue"

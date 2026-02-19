@@ -20,8 +20,11 @@ var/queue/done/*
 !var/queue/done/.gitkeep
 var/queue/failed/*
 !var/queue/failed/.gitkeep
+var/queue/awaiting_approval/*
+!var/queue/awaiting_approval/.gitkeep
 var/logs/*
 !var/logs/.gitkeep
+var/state.db
 
 # OS
 .DS_Store

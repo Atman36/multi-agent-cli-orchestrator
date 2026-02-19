@@ -7,7 +7,7 @@ Always-on оркестратор задач (jobs) для запуска нес�
 
 ## Что есть в MVP
 
-- ✅ File queue (без Redis): `var/queue/pending|running|done|failed`
+- ✅ File queue (без Redis): `var/queue/pending|awaiting_approval|running|done|failed`
 - ✅ Webhook server (FastAPI): принимает payload → валидирует → кладёт job в очередь
 - ✅ Runner: забирает job из очереди, исполняет шаги, делает retries/timeouts, пишет state
 - ✅ Workspace isolation: каждый job выполняется в `workspaces/<job_id>/work`
@@ -17,6 +17,8 @@ Always-on оркестратор задач (jobs) для запуска нес�
 - ✅ Контракты:
   - `contracts/job.schema.json`
   - `contracts/result.schema.json`
+- ✅ Secrets check артефактов (`scripts/verify_artifacts.sh`) после каждого шага
+- ✅ Budget gate (SQLite, дневные лимиты API calls / cost)
 - ✅ `/metrics` в формате Prometheus
 - ✅ Retention cleanup для `artifacts/` и `workspaces/`
 - ✅ Единый каталог артефактов: `artifacts/<job_id>/...`
@@ -88,6 +90,10 @@ curl -X POST "http://127.0.0.1:8080/webhook"   -H "Content-Type: application/jso
 ```bash
 python -m cli submit examples/jobs/simple_job.json
 python -m cli status <job_id>
+python -m cli doctor
+python -m cli recover
+python -m cli unlock --job <job_id>
+python -m cli approve --job <job_id>
 ```
 
 ## Безопасность (важно)
@@ -121,7 +127,7 @@ python -m cli status <job_id>
 ├── orchestrator/             # runner/scheduler/policy/artifacts
 ├── workers/                  # adapters for CLI agents (stubbed by default)
 ├── fsqueue/                 # filesystem queue implementation (Python package)
-├── var/queue/                # runtime queue directories (pending/running/done/failed)
+├── var/queue/                # runtime queue directories (pending/awaiting_approval/running/done/failed)
 ├── contracts/                # job/result JSON schemas
 ├── examples/                 # example jobs + webhook payloads
 ├── docs/                     # integration + security + extension docs

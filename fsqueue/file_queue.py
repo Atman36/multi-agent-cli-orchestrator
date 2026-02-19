@@ -27,6 +27,7 @@ class FileQueue:
 
     Directories (under QUEUE_ROOT):
       pending/  - new jobs
+      awaiting_approval/ - gated jobs that need manual approval
       running/  - claimed by a runner (atomic rename)
       done/     - completed successfully
       failed/   - failed (final)
@@ -40,14 +41,22 @@ class FileQueue:
         self.running = root / "running"
         self.done = root / "done"
         self.failed = root / "failed"
-        for p in [self.pending, self.running, self.done, self.failed]:
+        self.awaiting_approval = root / "awaiting_approval"
+        for p in [self.pending, self.running, self.done, self.failed, self.awaiting_approval]:
             p.mkdir(parents=True, exist_ok=True)
 
     def _job_exists_anywhere(self, job_id: str) -> bool:
-        for folder in [self.pending, self.running, self.done, self.failed]:
+        for folder in [self.pending, self.running, self.done, self.failed, self.awaiting_approval]:
             if any(folder.glob(f"{job_id}*.json")):
                 return True
         return False
+
+    def _resolve_enqueue_dir(self, state: str) -> Path:
+        if state == "pending":
+            return self.pending
+        if state == "awaiting_approval":
+            return self.awaiting_approval
+        raise ValueError(f"Unsupported queue state for enqueue: {state}")
 
     def _job_id_from_path(self, path: Path) -> str:
         try:
@@ -75,15 +84,16 @@ class FileQueue:
                 os.replace(src, alt)
                 return alt
 
-    def enqueue(self, job_obj: dict[str, Any]) -> str:
+    def enqueue(self, job_obj: dict[str, Any], *, state: str = "pending") -> str:
         job_id = str(job_obj.get("job_id") or job_obj.get("id") or "")
         if not job_id:
             raise ValueError("Job object missing job_id")
         if self._job_exists_anywhere(job_id):
             raise DuplicateJobError(f"Job with job_id='{job_id}' already exists")
 
-        tmp = self.pending / f".{job_id}.{int(time.time()*1000)}.tmp"
-        final = self.pending / f"{job_id}.json"
+        target_dir = self._resolve_enqueue_dir(state)
+        tmp = target_dir / f".{job_id}.{int(time.time()*1000)}.tmp"
+        final = target_dir / f"{job_id}.json"
         tmp.write_text(json.dumps(job_obj, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
         os.replace(tmp, final)
         return job_id
@@ -130,3 +140,34 @@ class FileQueue:
             except FileNotFoundError:
                 continue
         return reclaimed
+
+    def _find_job_file(self, folder: Path, job_id: str) -> Path | None:
+        files = sorted(folder.glob(f"{job_id}*.json"), key=lambda p: p.stat().st_mtime)
+        return files[0] if files else None
+
+    def approve(self, job_id: str) -> bool:
+        src = self._find_job_file(self.awaiting_approval, job_id)
+        if src is None:
+            return False
+        self._move_to_dir_no_overwrite(src, self.pending)
+        return True
+
+    def unlock(self, job_id: str) -> bool:
+        src = self._find_job_file(self.running, job_id)
+        if src is None:
+            return False
+        self._move_to_dir_no_overwrite(src, self.failed)
+        return True
+
+    def queue_state(self, job_id: str) -> str | None:
+        states = [
+            ("pending", self.pending),
+            ("running", self.running),
+            ("done", self.done),
+            ("failed", self.failed),
+            ("awaiting_approval", self.awaiting_approval),
+        ]
+        for state, folder in states:
+            if self._find_job_file(folder, job_id) is not None:
+                return state
+        return None

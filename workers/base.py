@@ -4,6 +4,7 @@ import asyncio
 import subprocess
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from functools import lru_cache
 from pathlib import Path
 
 from orchestrator.git_utils import current_head_commit, diff_since_commit, is_git_repo
@@ -58,8 +59,21 @@ class BaseWorker:
         """
         return await self.simulate(ctx)
 
+    @staticmethod
+    @lru_cache(maxsize=16)
+    def load_prompt(worker_name: str) -> str:
+        repo_root = Path(__file__).resolve().parents[1]
+        prompt_path = repo_root / "prompts" / f"{worker_name}.md"
+        if not prompt_path.exists():
+            return ""
+        return prompt_path.read_text(encoding="utf-8").strip()
+
     def build_full_prompt(self, ctx: StepContext) -> str:
         prompt = ctx.step.prompt
+        system_prompt = self.load_prompt(ctx.step.agent)
+        if system_prompt:
+            prompt = f"{system_prompt}\n\n## Task\n{prompt}"
+
         if not ctx.step.input_artifacts:
             return prompt
 

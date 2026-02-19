@@ -42,3 +42,14 @@ Nginx sample config: `deploy/nginx/orchestrator.conf`
 ## Log rotation
 
 Sample logrotate policy: `deploy/logrotate/orchestrator`
+
+## macOS (launchd)
+
+- Шаблоны launchd: `deploy/launchd/*.plist`
+- Автоустановка/перезагрузка сервисов: `scripts/install_launchd.sh`
+
+Пример:
+
+```bash
+bash scripts/install_launchd.sh
+```

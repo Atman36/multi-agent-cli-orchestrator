@@ -21,7 +21,7 @@ def _queue_size(path: Path) -> int:
 
 
 def render_prometheus_metrics(*, queue_root: Path, artifacts_root: Path) -> str:
-    queue_states = ("pending", "running", "done", "failed")
+    queue_states = ("pending", "running", "done", "failed", "awaiting_approval")
     queue_counts = {state: _queue_size(queue_root / state) for state in queue_states}
 
     job_status_counts: dict[str, int] = {}

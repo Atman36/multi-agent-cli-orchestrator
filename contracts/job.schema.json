@@ -176,6 +176,10 @@
             "type": "string"
           },
           "default": []
+        },
+        "requires_approval": {
+          "type": "boolean",
+          "default": false
         }
       }
     }

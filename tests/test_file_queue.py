@@ -40,6 +40,26 @@ class FileQueueTests(unittest.TestCase):
             self.assertFalse(running_file.exists())
             self.assertTrue(any(q.pending.glob("job-2*.json")))
 
+    def test_approve_moves_job_from_awaiting_to_pending(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            q = FileQueue(Path(td))
+            q.enqueue({"job_id": "job-approve-1", "goal": "x"}, state="awaiting_approval")
+
+            self.assertEqual(q.queue_state("job-approve-1"), "awaiting_approval")
+            approved = q.approve("job-approve-1")
+            self.assertTrue(approved)
+            self.assertEqual(q.queue_state("job-approve-1"), "pending")
+
+    def test_unlock_moves_running_job_to_failed(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            q = FileQueue(Path(td))
+            running_file = q.running / "job-unlock-1.json"
+            running_file.write_text(json.dumps({"job_id": "job-unlock-1", "goal": "x"}), encoding="utf-8")
+
+            unlocked = q.unlock("job-unlock-1")
+            self.assertTrue(unlocked)
+            self.assertEqual(q.queue_state("job-unlock-1"), "failed")
+
 
 if __name__ == "__main__":
     unittest.main()

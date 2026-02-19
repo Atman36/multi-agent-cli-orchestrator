@@ -22,6 +22,16 @@ def _env_int(name: str, default: int) -> int:
         return default
 
 
+def _env_float(name: str, default: float) -> float:
+    v = os.getenv(name)
+    if v is None:
+        return default
+    try:
+        return float(v)
+    except ValueError:
+        return default
+
+
 def _env_str(name: str, default: str) -> str:
     v = os.getenv(name)
     return v if v is not None and v != "" else default
@@ -72,6 +82,7 @@ class Settings:
     queue_root: Path
     artifacts_root: Path
     workspaces_root: Path
+    state_db_path: Path
     project_aliases: dict[str, Path]
 
     webhook_token: str
@@ -97,6 +108,8 @@ class Settings:
     max_input_artifact_chars: int
     max_input_artifacts_chars: int
     max_webhook_body_bytes: int
+    max_daily_api_calls: int
+    max_daily_cost_usd: float
     non_git_workdir_status: str
     retention_interval_sec: int
     artifacts_ttl_sec: int
@@ -110,6 +123,7 @@ class Settings:
         queue_root = Path(_env_str("QUEUE_ROOT", "var/queue")).resolve()
         artifacts_root = Path(_env_str("ARTIFACTS_ROOT", "artifacts")).resolve()
         workspaces_root = Path(_env_str("WORKSPACES_ROOT", "workspaces")).resolve()
+        state_db_path = Path(_env_str("STATE_DB_PATH", "var/state.db")).resolve()
         project_aliases = _env_path_map("PROJECT_ALIASES", "")
 
         webhook_token = _env_str("WEBHOOK_TOKEN", "dev-token")
@@ -144,6 +158,8 @@ class Settings:
         max_input_artifact_chars = _env_int("MAX_INPUT_ARTIFACT_CHARS", 12000)
         max_input_artifacts_chars = _env_int("MAX_INPUT_ARTIFACTS_CHARS", 40000)
         max_webhook_body_bytes = _env_int("MAX_WEBHOOK_BODY_BYTES", 262144)
+        max_daily_api_calls = max(0, _env_int("MAX_DAILY_API_CALLS", 0))
+        max_daily_cost_usd = max(0.0, _env_float("MAX_DAILY_COST_USD", 0.0))
         non_git_workdir_status = _env_str("NON_GIT_WORKDIR_STATUS", "needs_human").strip().lower()
         if non_git_workdir_status not in {"needs_human", "failed"}:
             non_git_workdir_status = "needs_human"
@@ -156,11 +172,13 @@ class Settings:
         # Ensure directories exist
         for p in [queue_root, artifacts_root, workspaces_root]:
             p.mkdir(parents=True, exist_ok=True)
+        state_db_path.parent.mkdir(parents=True, exist_ok=True)
 
         return Settings(
             queue_root=queue_root,
             artifacts_root=artifacts_root,
             workspaces_root=workspaces_root,
+            state_db_path=state_db_path,
             project_aliases=project_aliases,
             webhook_token=webhook_token,
             runner_poll_interval_sec=runner_poll_interval_sec,
@@ -180,6 +198,8 @@ class Settings:
             max_input_artifact_chars=max_input_artifact_chars,
             max_input_artifacts_chars=max_input_artifacts_chars,
             max_webhook_body_bytes=max_webhook_body_bytes,
+            max_daily_api_calls=max_daily_api_calls,
+            max_daily_cost_usd=max_daily_cost_usd,
             non_git_workdir_status=non_git_workdir_status,
             retention_interval_sec=retention_interval_sec,
             artifacts_ttl_sec=artifacts_ttl_sec,

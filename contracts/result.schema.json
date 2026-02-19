@@ -59,6 +59,17 @@
     "summary": {
       "type": "string"
     },
+    "secrets_check": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "enum": [
+        "passed",
+        "failed",
+        null
+      ]
+    },
     "artifacts": {
       "type": "object",
       "additionalProperties": false,
@@ -216,6 +227,17 @@
         },
         "summary": {
           "type": "string"
+        },
+        "secrets_check": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "enum": [
+            "passed",
+            "failed",
+            null
+          ]
         },
         "artifacts": {
           "type": "object",

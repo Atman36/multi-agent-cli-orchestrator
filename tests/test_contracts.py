@@ -45,7 +45,7 @@ class ContractTests(unittest.TestCase):
             goal="validate job schema",
             workdir=".",
             steps=[step],
-            policy=PolicySpec(),
+            policy=PolicySpec(requires_approval=True),
         )
         validate_json(job.model_dump(), _job_schema())
 
@@ -96,6 +96,7 @@ class ContractTests(unittest.TestCase):
                 finished_at=now,
                 summary="ok",
                 artifacts=paths,
+                secrets_check="passed",
             )
             validate_json(step_result.model_dump(), _result_schema())
 
@@ -118,6 +119,7 @@ class ContractTests(unittest.TestCase):
             finished_at=now,
             summary="reviewed",
             artifacts=step_artifacts,
+            secrets_check="passed",
         )
 
         job_artifacts = ArtifactPaths(
@@ -138,6 +140,7 @@ class ContractTests(unittest.TestCase):
             finished_at=now,
             summary="completed",
             artifacts=job_artifacts,
+            secrets_check="passed",
             steps=[step_result],
         )
         validate_json(job_result.model_dump(), _result_schema())

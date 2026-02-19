@@ -135,12 +135,13 @@ async def webhook(request: Request, authorization: Optional[str] = Header(defaul
     )
 
     try:
-        job_id = queue.enqueue(job.model_dump())
+        enqueue_state = "awaiting_approval" if job.policy.requires_approval else "pending"
+        job_id = queue.enqueue(job.model_dump(), state=enqueue_state)
     except DuplicateJobError as e:
         raise HTTPException(status_code=409, detail=str(e))
     return JSONResponse(
         {
-            "status": "queued",
+            "status": "awaiting_approval" if job.policy.requires_approval else "queued",
             "job_id": job_id,
             "artifacts_dir": str((settings.artifacts_root / job_id)),
             "status_url": f"/jobs/{job_id}",
@@ -151,16 +152,19 @@ async def webhook(request: Request, authorization: Optional[str] = Header(defaul
 @app.get("/jobs/{job_id}")
 def job_status(job_id: str) -> dict[str, Any]:
     assert settings is not None
+    assert queue is not None
     job_dir = settings.artifacts_root / job_id
     state_path = job_dir / "state.json"
     result_path = job_dir / "result.json"
 
     state = _read_json_if_exists(state_path)
     result = _read_json_if_exists(result_path)
+    queue_state = queue.queue_state(job_id)
 
     return {
         "job_id": job_id,
-        "status": (state or {}).get("status", "queued"),
+        "status": (state or {}).get("status") or queue_state or "queued",
+        "queue_state": queue_state,
         "state": state,
         "result": result,
     }

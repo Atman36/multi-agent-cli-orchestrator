@@ -2,18 +2,21 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import subprocess
 import time
 from pathlib import Path
 
 from dotenv import load_dotenv
 
 from orchestrator.artifact_store import ArtifactStore
+from orchestrator.budget import BudgetLimitExceeded, BudgetTracker
 from orchestrator.config import Settings
 from orchestrator.logging_utils import setup_logging
 from orchestrator.models import JobSpec, JobResult, StepResult, ArtifactPaths, ErrorInfo, utc_now_iso
 from orchestrator.policy import build_policy_from_env, PolicyError
 from orchestrator.preflight import assert_real_cli_ready, PreflightError
 from orchestrator.retention import run_retention
+from orchestrator.validation import validate_result_contract
 from orchestrator.validator import validate_json, SchemaValidationError
 from orchestrator.workspace import WorkspaceManager, WorkspaceError
 from fsqueue.file_queue import FileQueue, QueueEmpty
@@ -33,6 +36,10 @@ def _contracts_dir() -> Path:
     return _repo_root() / "contracts"
 
 
+def _verify_script() -> Path:
+    return _repo_root() / "scripts" / "verify_artifacts.sh"
+
+
 def _read_text(p: Path) -> str:
     if not p.exists():
         return ""
@@ -45,6 +52,27 @@ async def _sleep_backoff(base_sec: int, attempt: int) -> None:
     await asyncio.sleep(delay)
 
 
+def reclaim_stale_running_jobs(queue: FileQueue, stale_after_sec: int) -> int:
+    return queue.reclaim_stale_running(stale_after_sec)
+
+
+def _run_secrets_check(step_dir: Path) -> tuple[bool, str]:
+    script = _verify_script()
+    if not script.exists():
+        return True, "verify_artifacts.sh not found; check skipped"
+
+    proc = subprocess.run(
+        ["bash", str(script), str(step_dir)],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    msg = (proc.stdout or proc.stderr or "").strip()
+    if not msg:
+        msg = "secrets check completed"
+    return proc.returncode == 0, msg
+
+
 async def run_forever_async() -> None:
     load_dotenv()
     settings = Settings.load()
@@ -54,6 +82,11 @@ async def run_forever_async() -> None:
     q = FileQueue(settings.queue_root)
     store = ArtifactStore(settings.artifacts_root)
     workspace_manager = WorkspaceManager(settings.workspaces_root, settings.project_aliases)
+    budget = BudgetTracker(
+        db_path=settings.state_db_path,
+        max_daily_api_calls=settings.max_daily_api_calls,
+        max_daily_cost_usd=settings.max_daily_cost_usd,
+    )
 
     job_schema = _contracts_dir() / "job.schema.json"
     result_schema = _contracts_dir() / "result.schema.json"
@@ -78,7 +111,7 @@ async def run_forever_async() -> None:
     next_retention_at = 0.0
 
     while True:
-        reclaimed = q.reclaim_stale_running(settings.runner_reclaim_after_sec)
+        reclaimed = reclaim_stale_running_jobs(q, settings.runner_reclaim_after_sec)
         if reclaimed:
             log.warning("Reclaimed %s stale running job(s) back to pending", reclaimed)
         if settings.retention_interval_sec > 0 and time.time() >= next_retention_at:
@@ -187,19 +220,44 @@ async def run_forever_async() -> None:
                         idle_watchdog_sec=settings.runner_max_idle_sec,
                         non_git_workdir_status=settings.non_git_workdir_status,
                     )
+                    api_call_consumed = False
 
                     try:
+                        if budget.enabled:
+                            budget.check_budget()
+
                         # Hard timeout enforced here too (worker may also enforce)
                         res: StepResult = await asyncio.wait_for(worker.run(ctx), timeout=step.timeout_sec + 5)
+                        api_call_consumed = True
                         # Overwrite attempts to reflect retries
                         res.attempts = attempt
                         last_result = res
+                    except BudgetLimitExceeded as e:
+                        last_result = StepResult(
+                            job_id=job.job_id,
+                            step_id=step_id,
+                            agent=step.agent,
+                            role=step.role,
+                            status="failed",
+                            attempts=attempt,
+                            started_at=state["steps"][step_id]["started_at"],
+                            finished_at=utc_now_iso(),
+                            summary="Budget limit exceeded",
+                            artifacts=ArtifactPaths(
+                                report_md=str(Path("steps") / step_id / "report.md"),
+                                patch_diff=str(Path("steps") / step_id / "patch.diff"),
+                                logs_txt=str(Path("steps") / step_id / "logs.txt"),
+                                result_json=str(Path("steps") / step_id / "result.json"),
+                            ),
+                            error=ErrorInfo(code="budget_exceeded", message=str(e)),
+                        )
                     except PolicyError as e:
                         overall_status = "failed"
                         overall_error = ErrorInfo(code="policy", message=str(e))
                         last_result = None
                         break
                     except asyncio.TimeoutError:
+                        api_call_consumed = True
                         last_result = StepResult(
                             job_id=job.job_id,
                             step_id=step_id,
@@ -218,6 +276,7 @@ async def run_forever_async() -> None:
                             ),
                         )
                     except Exception as e:
+                        api_call_consumed = True
                         last_result = StepResult(
                             job_id=job.job_id,
                             step_id=step_id,
@@ -237,10 +296,41 @@ async def run_forever_async() -> None:
                             error=ErrorInfo(code="exception", message=str(e)),
                         )
 
-                    # Persist step artifacts (fixed filenames)
+                    # Validate artifacts for secret leaks and enforce result contract.
                     report_md = _read_text(step_dir / "report.md")
                     patch_diff = _read_text(step_dir / "patch.diff")
                     logs_txt = _read_text(step_dir / "logs.txt")
+                    secrets_ok, secrets_msg = _run_secrets_check(step_dir)
+                    logs_txt = (logs_txt.rstrip() + "\n\n" if logs_txt.strip() else "") + f"[secrets_check] {secrets_msg}\n"
+
+                    if secrets_ok:
+                        last_result = last_result.model_copy(update={"secrets_check": "passed"})
+                    else:
+                        last_result = last_result.model_copy(
+                            update={
+                                "status": "failed",
+                                "finished_at": utc_now_iso(),
+                                "summary": "Secrets check failed",
+                                "secrets_check": "failed",
+                                "error": ErrorInfo(
+                                    code="secrets_check_failed",
+                                    message="Potential secrets detected in step artifacts",
+                                ),
+                            }
+                        )
+
+                    try:
+                        validate_result_contract(last_result.model_dump(), result_schema)
+                    except SchemaValidationError as e:
+                        last_result = last_result.model_copy(
+                            update={
+                                "status": "failed",
+                                "finished_at": utc_now_iso(),
+                                "summary": "Result schema validation failed",
+                                "error": ErrorInfo(code="result_schema_validation_failed", message=str(e)),
+                            }
+                        )
+
                     store.write_step_artifacts(
                         job.job_id,
                         step_id,
@@ -250,11 +340,12 @@ async def run_forever_async() -> None:
                         result_obj=last_result.model_dump(),
                     )
 
-                    # Validate result contract (best effort)
-                    try:
-                        validate_json(last_result.model_dump(), result_schema)
-                    except SchemaValidationError as e:
-                        log.error("Result schema validation failed: %s", e)
+                    if budget.enabled and api_call_consumed:
+                        budget.log_budget(
+                            step.agent,
+                            api_calls=1,
+                            cost_usd=float(last_result.metrics.cost_usd or 0.0),
+                        )
 
                     state["steps"][step_id].update({
                         "status": last_result.status,
@@ -324,9 +415,16 @@ async def run_forever_async() -> None:
                 finished_at=finished_at,
                 summary=f"Completed with status={overall_status}. steps={len(step_results)}",
                 artifacts=job_artifacts,
+                secrets_check=(
+                    "passed"
+                    if step_results and all(sr.secrets_check == "passed" for sr in step_results)
+                    else "failed"
+                ),
                 steps=step_results,
                 error=overall_error,
             )
+
+            validate_result_contract(job_result.model_dump(), result_schema)
 
             store.write_job_artifacts(
                 job.job_id,

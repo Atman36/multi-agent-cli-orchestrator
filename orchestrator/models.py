@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 
 AGENT = str
 NETWORK_POLICY = Literal["deny", "allow"]
+SECRETS_CHECK = Literal["passed", "failed"]
 
 
 def utc_now_iso() -> str:
@@ -37,6 +38,7 @@ class PolicySpec(BaseModel):
     sandbox: bool = True
     network: NETWORK_POLICY = "deny"
     allowed_binaries: list[str] = Field(default_factory=list, description="Allowlist of executable binaries")
+    requires_approval: bool = False
     # Future: allowed_tools per agent, allowed_paths, max_cost_usd, etc.
 
 
@@ -97,6 +99,7 @@ class StepResult(BaseModel):
 
     summary: str
     artifacts: ArtifactPaths
+    secrets_check: SECRETS_CHECK | None = None
     metrics: Metrics = Field(default_factory=Metrics)
     error: Optional[ErrorInfo] = None
 
@@ -113,6 +116,7 @@ class JobResult(BaseModel):
 
     summary: str
     artifacts: ArtifactPaths
+    secrets_check: SECRETS_CHECK | None = None
 
     steps: list[StepResult] = Field(default_factory=list)
     error: Optional[ErrorInfo] = None
@@ -125,7 +129,7 @@ def default_pipeline(goal: str) -> list[StepSpec]:
             step_id="01_plan",
             agent="opencode",
             role="planner",
-            prompt=f"You are the planner. Produce a concise implementation plan for: {goal}",
+            prompt=f"Сформируй план реализации для задачи:\n{goal}",
             timeout_sec=120,
             max_retries=1,
         ),
@@ -133,7 +137,7 @@ def default_pipeline(goal: str) -> list[StepSpec]:
             step_id="02_implement",
             agent="codex",
             role="implementer",
-            prompt=f"You are the implementer. Implement the plan for: {goal}. Produce a patch and logs.",
+            prompt=f"Реализуй задачу и подготовь патч:\n{goal}",
             timeout_sec=300,
             max_retries=1,
             input_artifacts=["steps/01_plan/report.md"],
@@ -142,7 +146,7 @@ def default_pipeline(goal: str) -> list[StepSpec]:
             step_id="03_review",
             agent="claude",
             role="reviewer",
-            prompt=f"You are the reviewer. Review the patch and report for: {goal}. Provide risks and next steps.",
+            prompt=f"Проведи review изменений и рисков по задаче:\n{goal}",
             timeout_sec=180,
             max_retries=1,
             input_artifacts=["steps/01_plan/report.md", "steps/02_implement/report.md", "steps/02_implement/patch.diff"],
