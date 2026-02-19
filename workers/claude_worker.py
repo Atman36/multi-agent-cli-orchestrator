@@ -6,8 +6,9 @@ from datetime import datetime, timezone
 from typing import Any
 
 from orchestrator.models import ErrorInfo, Metrics, StepResult
-from orchestrator.subprocess_utils import run_command
-from workers.base import BaseWorker, StepContext
+from orchestrator.subprocess_utils import CommandResult
+from workers.agent_executor import AgentExecutor, ParsedOutput
+from workers.base import StepContext
 from workers.registry import register_worker
 
 
@@ -17,10 +18,17 @@ def utc_now_iso() -> str:
 
 def _default_allowed_tools(role: str) -> list[str]:
     normalized = role.lower()
-    if "implement" in normalized:
-        return ["Read", "Write", "Edit", "Bash(git *)"]
     if "review" in normalized:
         return ["Read", "Grep", "Glob"]
+    # Claude stays review-first in this orchestrator.
+    return ["Read", "Grep", "Glob"]
+
+
+def _claude_allowed_tools(ctx: StepContext) -> list[str]:
+    readonly = {"Read", "Grep", "Glob"}
+    requested = ctx.step.allowed_tools or _default_allowed_tools(ctx.step.role)
+    if set(requested).issubset(readonly):
+        return requested
     return ["Read", "Grep", "Glob"]
 
 
@@ -72,20 +80,12 @@ def _extract_claude_text(payload: Any) -> str:
     return ""
 
 
-class ClaudeWorker(BaseWorker):
+class ClaudeWorker(AgentExecutor):
     AGENT_NAME = "claude"
 
-    async def run(self, ctx: StepContext) -> StepResult:
-        ctx.step_dir.mkdir(parents=True, exist_ok=True)
-
-        if not ctx.enable_real_cli:
-            return await self.simulate(ctx)
-
-        full_prompt = self.build_full_prompt(ctx)
-        base_commit = self.capture_base_commit(ctx)
-        allowed_tools = ctx.step.allowed_tools or _default_allowed_tools(ctx.step.role)
-
-        cmd = [
+    def build_cmd(self, ctx: StepContext, full_prompt: str) -> list[str]:
+        allowed_tools = _claude_allowed_tools(ctx)
+        return [
             "claude",
             "-p",
             full_prompt,
@@ -94,21 +94,8 @@ class ClaudeWorker(BaseWorker):
             "--output-format",
             "json",
         ]
-        cmd = ctx.policy.wrap_command(cmd)
 
-        started_at = utc_now_iso()
-        result = await run_command(
-            cmd,
-            cwd=ctx.job.workdir,
-            env={},
-            env_allowlist=sorted(ctx.env_allowlist),
-            clear_env=ctx.sandbox_clear_env,
-            timeout_sec=ctx.step.timeout_sec,
-            idle_timeout_sec=ctx.idle_watchdog_sec,
-            log_file=None,
-        )
-        finished_at = utc_now_iso()
-
+    def parse_output(self, ctx: StepContext, result: CommandResult) -> ParsedOutput:
         parse_error: str | None = None
         extracted_text = ""
         payload: Any = None
@@ -124,7 +111,7 @@ class ClaudeWorker(BaseWorker):
         if result.exit_code != 0 and parse_error is None:
             parse_error = f"claude exited with code {result.exit_code}"
 
-        status = "success"
+        status: str | None = "success"
         error: ErrorInfo | None = None
         if parse_error is not None:
             status = "failed"
@@ -153,38 +140,22 @@ class ClaudeWorker(BaseWorker):
             )
             summary = f"Claude parse_error (exit_code={result.exit_code})"
 
-        patch_diff = self.capture_patch_diff(ctx, base_commit)
-        logs_txt = (
+        return ParsedOutput(
+            report_md=report_md,
+            summary=summary,
+            status=status,
+            error=error,
+        )
+
+    def build_logs(self, ctx: StepContext, result: CommandResult, status: str) -> str:
+        allowed_tools = _claude_allowed_tools(ctx)
+        return (
             f"[{ctx.step.step_id}] claude run\n"
             f"exit_code={result.exit_code}\n"
             f"duration_ms={result.duration_ms}\n"
             f"killed_by_watchdog={result.killed_by_watchdog}\n"
             f"allowed_tools={','.join(allowed_tools)}\n"
             f"status={status}\n"
-        )
-
-        self.write_artifacts(
-            ctx,
-            report_md=report_md,
-            patch_diff=patch_diff,
-            logs_txt=logs_txt,
-            raw_stdout=result.stdout,
-            raw_stderr=result.stderr,
-        )
-
-        return StepResult(
-            job_id=ctx.job.job_id,
-            step_id=ctx.step.step_id,
-            agent=ctx.step.agent,
-            role=ctx.step.role,
-            status=status,
-            attempts=1,
-            started_at=started_at,
-            finished_at=finished_at,
-            summary=summary,
-            artifacts=self.artifact_paths(ctx),
-            metrics=Metrics(duration_ms=result.duration_ms),
-            error=error,
         )
 
     async def simulate(self, ctx: StepContext) -> StepResult:

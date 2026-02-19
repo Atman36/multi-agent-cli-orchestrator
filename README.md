@@ -10,12 +10,15 @@ Always-on оркестратор задач (jobs) для запуска нес�
 - ✅ File queue (без Redis): `var/queue/pending|running|done|failed`
 - ✅ Webhook server (FastAPI): принимает payload → валидирует → кладёт job в очередь
 - ✅ Runner: забирает job из очереди, исполняет шаги, делает retries/timeouts, пишет state
+- ✅ Workspace isolation: каждый job выполняется в `workspaces/<job_id>/work`
 - ✅ Workers-адаптеры: `opencode_worker`, `claude_worker`, `codex_worker`
   - по умолчанию: **simulation mode** (без внешних зависимостей/ключей)
-  - TODO: реальные CLI вызовы (subprocess + sandbox wrapper)
+  - при `ENABLE_REAL_CLI=1`: единый executor, allowlist и preflight версий
 - ✅ Контракты:
   - `contracts/job.schema.json`
   - `contracts/result.schema.json`
+- ✅ `/metrics` в формате Prometheus
+- ✅ Retention cleanup для `artifacts/` и `workspaces/`
 - ✅ Единый каталог артефактов: `artifacts/<job_id>/...`
 - ✅ Примеры: `examples/jobs/*` + `examples/webhook_payloads/*`
 
@@ -64,6 +67,7 @@ make dev
 Проверка:
 ```bash
 curl -s http://127.0.0.1:8080/health | jq .
+curl -s http://127.0.0.1:8080/metrics
 ```
 
 ### 3) Отправить webhook (создать job)
@@ -91,17 +95,23 @@ python -m cli status <job_id>
 - Оркестратор **не запускает реальные CLI по умолчанию**.
 - Для включения реальных CLI нужно явно выставить:
   - `ENABLE_REAL_CLI=1`
+  - (опционально) `MIN_BINARY_VERSIONS=opencode=...,codex=...,claude=...,git=...`
   - настроить allowlist (`ALLOWED_BINARIES=...`)
   - настроить allowlist окружения (`ENV_ALLOWLIST=...`)
   - при необходимости включить жёсткий режим env (`SANDBOX_CLEAR_ENV=1`)
   - настроить лимиты входных артефактов (`MAX_INPUT_ARTIFACTS_FILES`, `MAX_INPUT_ARTIFACT_CHARS`, `MAX_INPUT_ARTIFACTS_CHARS`)
   - настроить sandbox wrapper или отключить sandbox осознанно
+  - выбрать поведение для non-git каталога: `NON_GIT_WORKDIR_STATUS=needs_human|failed`
 
 См. подробности: `docs/SECURITY.md`.
 
 ## Как добавить нового агента
 
 См. `docs/ADD_AGENT.md`.
+
+## Deployment
+
+См. `docs/DEPLOYMENT.md` и шаблоны в `deploy/`.
 
 ## Структура репозитория
 

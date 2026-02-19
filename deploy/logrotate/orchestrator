@@ -1,0 +1,9 @@
+/opt/multi-agent-cli-orchestrator/var/logs/*.log {
+    daily
+    rotate 14
+    compress
+    delaycompress
+    missingok
+    notifempty
+    copytruncate
+}

@@ -13,6 +13,9 @@
    - если `ENABLE_REAL_CLI=1` и `SANDBOX=1`, но wrapper не задан → оркестратор откажется запускать команды
 4) **No shell=True**:
    - subprocess запускаются списком аргументов, чтобы не допустить shell injection
+5) **Workspace isolation**:
+   - каждый job исполняется в `WORKSPACES_ROOT/<job_id>/work`
+   - `webhook.workdir` игнорируется; для выбора исходного репо используйте `project_id` + `PROJECT_ALIASES`
 
 ## Что sandbox НЕ делает в MVP
 

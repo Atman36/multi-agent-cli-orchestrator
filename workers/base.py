@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 import asyncio
+import subprocess
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
-from orchestrator.git_utils import current_head_commit, diff_since_commit
+from orchestrator.git_utils import current_head_commit, diff_since_commit, is_git_repo
 from orchestrator.log_sanitizer import redact
-from orchestrator.models import ArtifactPaths, JobSpec, Metrics, StepResult, StepSpec
+from orchestrator.models import ArtifactPaths, ErrorInfo, JobSpec, Metrics, StepResult, StepSpec
 from orchestrator.policy import ExecutionPolicy
 
 
@@ -36,6 +37,7 @@ class StepContext:
     max_input_artifact_chars: int
     max_input_artifacts_chars: int
     idle_watchdog_sec: int | None = None
+    non_git_workdir_status: str = "needs_human"
 
 
 class WorkerError(RuntimeError):
@@ -158,6 +160,64 @@ class BaseWorker:
 
     def capture_patch_diff(self, ctx: StepContext, base_commit: str | None) -> str:
         return diff_since_commit(ctx.job.workdir, base_commit)
+
+    def ensure_git_repo(self, ctx: StepContext) -> ErrorInfo | None:
+        if is_git_repo(ctx.job.workdir):
+            return None
+        return ErrorInfo(
+            code="non_git_workdir",
+            message=f"Workdir is not a git repository: {ctx.job.workdir}",
+            details={"workdir": ctx.job.workdir, "status": ctx.non_git_workdir_status},
+        )
+
+    def apply_requested_patches(self, ctx: StepContext) -> ErrorInfo | None:
+        if not ctx.step.apply_patches_from:
+            return None
+
+        git_error = self.ensure_git_repo(ctx)
+        if git_error is not None:
+            return git_error
+
+        job_root = ctx.job_dir.resolve()
+        for rel_patch in ctx.step.apply_patches_from:
+            patch_path = (ctx.job_dir / rel_patch).resolve()
+            if not _is_within(job_root, patch_path):
+                return ErrorInfo(
+                    code="invalid_patch_path",
+                    message=f"Patch path escapes job dir: {rel_patch}",
+                    details={"patch": rel_patch},
+                )
+            if not patch_path.exists():
+                return ErrorInfo(
+                    code="missing_patch",
+                    message=f"Patch file does not exist: {rel_patch}",
+                    details={"patch": rel_patch},
+                )
+            if patch_path.is_dir():
+                return ErrorInfo(
+                    code="invalid_patch_path",
+                    message=f"Patch path is a directory: {rel_patch}",
+                    details={"patch": rel_patch},
+                )
+
+            proc = subprocess.run(
+                ["git", "apply", "--whitespace=nowarn", str(patch_path)],
+                cwd=ctx.job.workdir,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            if proc.returncode != 0:
+                return ErrorInfo(
+                    code="patch_apply_failed",
+                    message=f"Failed to apply patch: {rel_patch}",
+                    details={
+                        "patch": rel_patch,
+                        "exit_code": proc.returncode,
+                        "stderr": proc.stderr.strip(),
+                    },
+                )
+        return None
 
     async def simulate(self, ctx: StepContext) -> StepResult:
         """Default simulation: create deterministic artifacts."""

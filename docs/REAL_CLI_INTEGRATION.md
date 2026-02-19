@@ -21,7 +21,12 @@ ENV_ALLOWLIST=ANTHROPIC_API_KEY,OPENAI_API_KEY,PATH,HOME,TMPDIR
 SENSITIVE_ENV_VARS=ANTHROPIC_API_KEY,OPENAI_API_KEY
 ```
 
-4) Sandbox (рекомендуется оставить включённым):
+4) (Опционально) включите fail-fast проверки версий:
+```env
+MIN_BINARY_VERSIONS=opencode=1.0.0,codex=1.0.0,claude=1.0.0,git=2.39.0
+```
+
+5) Sandbox (рекомендуется оставить включённым):
 ```env
 SANDBOX=1
 SANDBOX_WRAPPER=bwrap
@@ -32,11 +37,11 @@ SANDBOX_WRAPPER_ARGS=--unshare-all --die-with-parent --ro-bind /usr /usr --proc 
 
 ## 2) Где менять команды
 
-- `workers/opencode_worker.py`
-- `workers/claude_worker.py`
-- `workers/codex_worker.py`
-
-В каждом воркере в методе `run()` есть блок `REAL CLI MODE (TODO...)`.
+- общий слой запуска: `workers/agent_executor.py`
+- адаптеры:
+  - `workers/opencode_worker.py`
+  - `workers/claude_worker.py`
+  - `workers/codex_worker.py`
 
 ### OpenCode
 Простейший вариант (subprocess):
@@ -65,10 +70,13 @@ MVP пока пишет `patch.diff` как:
 
 Чтобы сделать правильно:
 1) Работайте в git-репо в `workdir`
-2) До запуска шага сохраните `git status --porcelain`
+2) До запуска шага сохраните базовый commit (`git rev-parse HEAD`)
 3) После шага снимите diff:
    - `git diff` (или `git diff --staged` если агент коммитит)
 4) Запишите unified diff в `patch.diff`
+
+Если `workdir` не является git-репозиторием, шаг завершится статусом `needs_human`
+(или `failed`, если `NON_GIT_WORKDIR_STATUS=failed`).
 
 Альтернатива: `git format-patch` (если агент делает коммиты).
 

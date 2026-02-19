@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -11,7 +12,10 @@ from orchestrator.config import Settings
 from orchestrator.logging_utils import setup_logging
 from orchestrator.models import JobSpec, JobResult, StepResult, ArtifactPaths, ErrorInfo, utc_now_iso
 from orchestrator.policy import build_policy_from_env, PolicyError
+from orchestrator.preflight import assert_real_cli_ready, PreflightError
+from orchestrator.retention import run_retention
 from orchestrator.validator import validate_json, SchemaValidationError
+from orchestrator.workspace import WorkspaceManager, WorkspaceError
 from fsqueue.file_queue import FileQueue, QueueEmpty
 
 from workers.base import StepContext
@@ -44,11 +48,12 @@ async def _sleep_backoff(base_sec: int, attempt: int) -> None:
 async def run_forever_async() -> None:
     load_dotenv()
     settings = Settings.load()
-    setup_logging(settings.log_level)
+    setup_logging(settings.log_level, json_output=settings.log_json)
     ensure_workers_registered()
 
     q = FileQueue(settings.queue_root)
     store = ArtifactStore(settings.artifacts_root)
+    workspace_manager = WorkspaceManager(settings.workspaces_root, settings.project_aliases)
 
     job_schema = _contracts_dir() / "job.schema.json"
     result_schema = _contracts_dir() / "result.schema.json"
@@ -60,13 +65,37 @@ async def run_forever_async() -> None:
         sandbox_wrapper_args=settings.sandbox_wrapper_args,
         network_policy=settings.network_policy,
     )
+    if settings.enable_real_cli:
+        versions = assert_real_cli_ready(
+            allowed_binaries=settings.allowed_binaries,
+            min_binary_versions=settings.min_binary_versions,
+            required_binaries=["opencode", "codex", "claude", "git"],
+        )
+        if versions:
+            log.info("Real CLI preflight versions: %s", versions)
 
     log.info("Runner started. enable_real_cli=%s sandbox=%s", settings.enable_real_cli, settings.sandbox)
+    next_retention_at = 0.0
 
     while True:
         reclaimed = q.reclaim_stale_running(settings.runner_reclaim_after_sec)
         if reclaimed:
             log.warning("Reclaimed %s stale running job(s) back to pending", reclaimed)
+        if settings.retention_interval_sec > 0 and time.time() >= next_retention_at:
+            stats = run_retention(
+                queue_root=settings.queue_root,
+                artifacts_root=settings.artifacts_root,
+                workspaces_root=settings.workspaces_root,
+                artifacts_ttl_sec=settings.artifacts_ttl_sec,
+                workspaces_ttl_sec=settings.workspaces_ttl_sec,
+            )
+            if stats.removed_artifacts or stats.removed_workspaces:
+                log.info(
+                    "Retention cleanup removed artifacts=%s workspaces=%s",
+                    stats.removed_artifacts,
+                    stats.removed_workspaces,
+                )
+            next_retention_at = time.time() + settings.retention_interval_sec
 
         try:
             claimed = q.claim()
@@ -81,6 +110,14 @@ async def run_forever_async() -> None:
             validate_json(job_obj, job_schema)
 
             job = JobSpec.model_validate(job_obj)
+            if job.project_id:
+                source_hint: Path | None = workspace_manager.resolve_project_alias(job.project_id)
+            elif job.source.type == "webhook":
+                source_hint = None
+            else:
+                source_hint = Path(job.workdir).expanduser()
+            layout = workspace_manager.prepare_workspace(job_id=job.job_id, source_hint=source_hint)
+            job = job.model_copy(update={"workdir": str(layout.workdir)})
 
             store.ensure_job_layout(job.job_id)
             store.write_job_spec(job.job_id, job.model_dump())
@@ -148,6 +185,7 @@ async def run_forever_async() -> None:
                         max_input_artifact_chars=settings.max_input_artifact_chars,
                         max_input_artifacts_chars=settings.max_input_artifacts_chars,
                         idle_watchdog_sec=settings.runner_max_idle_sec,
+                        non_git_workdir_status=settings.non_git_workdir_status,
                     )
 
                     try:
@@ -310,6 +348,10 @@ async def run_forever_async() -> None:
             log.info("Job %s finished: %s", job.job_id, overall_status)
 
         except Exception as e:
+            if isinstance(e, WorkspaceError):
+                log.error("Workspace preparation failed: %s", e)
+            if isinstance(e, PreflightError):
+                log.error("Preflight failed: %s", e)
             log.exception("Job failed unexpectedly: %s", e)
             try:
                 q.fail(claimed)

@@ -52,6 +52,15 @@
       "minLength": 1,
       "maxLength": 5000
     },
+    "project_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+    },
     "workdir": {
       "type": "string",
       "minLength": 1,
@@ -118,6 +127,13 @@
             "default": 2
           },
           "input_artifacts": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "default": []
+          },
+          "apply_patches_from": {
             "type": "array",
             "items": {
               "type": "string"

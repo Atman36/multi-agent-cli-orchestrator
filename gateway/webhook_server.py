@@ -8,11 +8,12 @@ from typing import Any, Optional
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, Header, HTTPException, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, PlainTextResponse
 import uvicorn
 
 from orchestrator.config import Settings
 from orchestrator.logging_utils import setup_logging
+from orchestrator.metrics import render_prometheus_metrics
 from orchestrator.models import JobSpec, JobSource, default_pipeline, StepSpec, PolicySpec
 from fsqueue.file_queue import DuplicateJobError, FileQueue
 
@@ -48,7 +49,7 @@ def _startup() -> None:
     global settings, queue
     load_dotenv()
     settings = Settings.load()
-    setup_logging(settings.log_level)
+    setup_logging(settings.log_level, json_output=settings.log_json)
     queue = FileQueue(settings.queue_root)
     log.info("Webhook server started")
 
@@ -56,6 +57,13 @@ def _startup() -> None:
 @app.get("/health")
 def health() -> dict[str, Any]:
     return {"ok": True}
+
+
+@app.get("/metrics")
+def metrics() -> PlainTextResponse:
+    assert settings is not None
+    body = render_prometheus_metrics(queue_root=settings.queue_root, artifacts_root=settings.artifacts_root)
+    return PlainTextResponse(content=body, media_type="text/plain; version=0.0.4")
 
 
 @app.post("/webhook")
@@ -87,11 +95,20 @@ async def webhook(request: Request, authorization: Optional[str] = Header(defaul
     if not goal:
         raise HTTPException(status_code=400, detail="Missing 'goal'")
 
-    workdir = str(payload.get("workdir") or ".")
+    requested_workdir = payload.get("workdir")
+    project_id_raw = payload.get("project_id")
+    project_id = str(project_id_raw).strip() if project_id_raw is not None else None
+    if project_id == "":
+        project_id = None
+    if project_id is not None and project_id not in settings.project_aliases:
+        raise HTTPException(status_code=400, detail=f"Unknown project_id '{project_id}'")
+
     steps_payload = payload.get("steps")
     policy_payload = payload.get("policy") or {}
     tags = list(payload.get("tags") or [])
     metadata = dict(payload.get("metadata") or {})
+    if requested_workdir is not None:
+        metadata["ignored_workdir"] = str(requested_workdir)
 
     if steps_payload:
         try:
@@ -111,7 +128,8 @@ async def webhook(request: Request, authorization: Optional[str] = Header(defaul
         source=JobSource(type="webhook", meta={"remote": request.client.host if request.client else None}),
         steps=steps,
         policy=policy,
-        workdir=workdir,
+        project_id=project_id,
+        workdir=".",
         tags=tags,
         metadata=metadata,
     )

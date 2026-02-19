@@ -86,6 +86,80 @@ class WebhookServerTests(unittest.TestCase):
                     self.assertIsInstance(payload["state"], dict)
                     self.assertIsInstance(payload["result"], dict)
 
+    def test_webhook_ignores_payload_workdir_and_keeps_project_alias(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            queue_root = Path(td) / "queue"
+            artifacts_root = Path(td) / "artifacts"
+            workspaces_root = Path(td) / "workspaces"
+            repo_root = Path(td) / "repo"
+            repo_root.mkdir(parents=True, exist_ok=True)
+
+            env = {
+                "WEBHOOK_TOKEN": "test-token",
+                "QUEUE_ROOT": str(queue_root),
+                "ARTIFACTS_ROOT": str(artifacts_root),
+                "WORKSPACES_ROOT": str(workspaces_root),
+                "PROJECT_ALIASES": f"demo={repo_root}",
+            }
+            with patch.dict(os.environ, env, clear=False):
+                webhook_server.settings = None
+                webhook_server.queue = None
+                with TestClient(webhook_server.app) as client:
+                    resp = client.post(
+                        "/webhook",
+                        headers={"Authorization": "Bearer test-token"},
+                        json={"goal": "run tests", "project_id": "demo", "workdir": "/etc"},
+                    )
+                    self.assertEqual(resp.status_code, 200)
+                    pending_files = list((queue_root / "pending").glob("*.json"))
+                    self.assertEqual(len(pending_files), 1)
+                    obj = json.loads(pending_files[0].read_text(encoding="utf-8"))
+                    self.assertEqual(obj["workdir"], ".")
+                    self.assertEqual(obj["project_id"], "demo")
+                    self.assertEqual(obj["metadata"]["ignored_workdir"], "/etc")
+
+    def test_webhook_rejects_unknown_project_alias(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            queue_root = Path(td) / "queue"
+            artifacts_root = Path(td) / "artifacts"
+            workspaces_root = Path(td) / "workspaces"
+            env = {
+                "WEBHOOK_TOKEN": "test-token",
+                "QUEUE_ROOT": str(queue_root),
+                "ARTIFACTS_ROOT": str(artifacts_root),
+                "WORKSPACES_ROOT": str(workspaces_root),
+                "PROJECT_ALIASES": "",
+            }
+            with patch.dict(os.environ, env, clear=False):
+                webhook_server.settings = None
+                webhook_server.queue = None
+                with TestClient(webhook_server.app) as client:
+                    resp = client.post(
+                        "/webhook",
+                        headers={"Authorization": "Bearer test-token"},
+                        json={"goal": "run tests", "project_id": "missing"},
+                    )
+                    self.assertEqual(resp.status_code, 400)
+
+    def test_metrics_endpoint_returns_prometheus_text(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            queue_root = Path(td) / "queue"
+            artifacts_root = Path(td) / "artifacts"
+            workspaces_root = Path(td) / "workspaces"
+            env = {
+                "WEBHOOK_TOKEN": "test-token",
+                "QUEUE_ROOT": str(queue_root),
+                "ARTIFACTS_ROOT": str(artifacts_root),
+                "WORKSPACES_ROOT": str(workspaces_root),
+            }
+            with patch.dict(os.environ, env, clear=False):
+                webhook_server.settings = None
+                webhook_server.queue = None
+                with TestClient(webhook_server.app) as client:
+                    resp = client.get("/metrics")
+                    self.assertEqual(resp.status_code, 200)
+                    self.assertIn("orchestrator_queue_jobs", resp.text)
+
 
 if __name__ == "__main__":
     unittest.main()

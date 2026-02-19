@@ -29,6 +29,7 @@ class StepSpec(BaseModel):
     max_retries: int = Field(default=1, ge=0, le=10)
     retry_backoff_sec: int = Field(default=2, ge=0, le=60)
     input_artifacts: list[str] = Field(default_factory=list, description="Relative paths inside artifacts/<job_id>/")
+    apply_patches_from: list[str] = Field(default_factory=list, description="Relative patch paths to apply before the step")
     allowed_tools: list[str] | None = Field(default=None, description="Tool allowlist override for compatible agents")
 
 
@@ -46,6 +47,7 @@ class JobSpec(BaseModel):
     source: JobSource = Field(default_factory=JobSource)
     goal: str = Field(..., min_length=1, max_length=5000)
 
+    project_id: str | None = Field(default=None, description="Allowed project alias (for webhook/scheduled jobs)")
     workdir: str = Field(default=".", description="Working directory for execution (repo/workspace)")
     steps: list[StepSpec]
     policy: PolicySpec = Field(default_factory=PolicySpec)

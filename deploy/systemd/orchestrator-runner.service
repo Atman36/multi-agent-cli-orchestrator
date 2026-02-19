@@ -1,0 +1,23 @@
+[Unit]
+Description=Multi-Agent Orchestrator Runner
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=orchestrator
+Group=orchestrator
+WorkingDirectory=/opt/multi-agent-cli-orchestrator
+EnvironmentFile=/etc/multi-agent-orchestrator/orchestrator.env
+ExecStart=/opt/multi-agent-cli-orchestrator/.venv/bin/python -m orchestrator.runner
+Restart=always
+RestartSec=1
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/multi-agent-cli-orchestrator/var /opt/multi-agent-cli-orchestrator/artifacts /opt/multi-agent-cli-orchestrator/workspaces
+LimitNOFILE=65535
+
+[Install]
+WantedBy=multi-user.target

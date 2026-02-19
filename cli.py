@@ -44,6 +44,7 @@ def cmd_submit(args: argparse.Namespace) -> int:
             source=JobSource(type="manual", meta={"file": str(path)}),
             steps=steps,
             policy=PolicySpec(**(job_obj.get("policy") or {})),
+            project_id=(str(job_obj.get("project_id")).strip() if job_obj.get("project_id") is not None else None),
             workdir=str(job_obj.get("workdir") or "."),
             tags=list(job_obj.get("tags") or []),
             metadata=dict(job_obj.get("metadata") or {}),
@@ -71,7 +72,7 @@ def cmd_status(args: argparse.Namespace) -> int:
 def main() -> int:
     load_dotenv()
     settings = Settings.load()
-    setup_logging(settings.log_level)
+    setup_logging(settings.log_level, json_output=settings.log_json)
 
     parser = argparse.ArgumentParser(prog="orchestrator-cli")
     sub = parser.add_subparsers(dest="cmd", required=True)

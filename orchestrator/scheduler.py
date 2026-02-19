@@ -92,6 +92,7 @@ class CronScheduler:
                     source=JobSource(type="cron", meta={"schedule_id": sched_id, "file": str(f)}),
                     steps=steps,
                     policy=PolicySpec(**(payload.get("policy") or {})),
+                    project_id=(str(payload.get("project_id")).strip() if payload.get("project_id") is not None else None),
                     workdir=str(payload.get("workdir") or "."),
                     tags=list(payload.get("tags") or []),
                     metadata=dict(payload.get("metadata") or {}),
@@ -110,7 +111,7 @@ class CronScheduler:
 def main() -> None:
     load_dotenv()
     settings = Settings.load()
-    setup_logging(settings.log_level)
+    setup_logging(settings.log_level, json_output=settings.log_json)
 
     q = FileQueue(settings.queue_root)
     sdir = _schedules_dir()
