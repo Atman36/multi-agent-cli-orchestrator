@@ -121,8 +121,8 @@ python -m cli status <job_id>          # Check status
 
 ### Testing
 ```bash
-pytest tests/                          # All tests
-pytest tests/test_file_queue.py        # Single module
+python3 -m unittest discover -s tests      # All tests (pytest not installed)
+python3 -m unittest tests.test_file_queue  # Single module
 ```
 
 ## Job Execution Architecture
@@ -141,8 +141,9 @@ Job (goal)
 1. **Enqueue**: job is placed in `var/queue/pending/<job_id>.json`
 2. **Claim**: runner atomically moves to `var/queue/running/`
 3. **Execution**: sequential execution of steps
-4. **Artifacts**: each step writes to `artifacts/<job_id>/steps/<step_id>/`
+4. **Artifacts**: each step writes to `artifacts/<job_id>/steps/<step_id>/`; context saved to `artifacts/<job_id>/context.json`
 5. **Complete**: job is moved to `var/queue/done/` or `var/queue/failed/`
+6. **Awaiting human**: if `on_failure: ask_human`, job moves to `var/queue/awaiting_approval/` with status `needs_human`
 
 ## Agent Roles and Boundaries
 
@@ -165,6 +166,7 @@ Job (goal)
 - `job.json` — normalized JobSpec
 - `state.json` — current statuses/attempts
 - `result.json` — aggregated result
+- `context.json` — conversation context window (updated after each step)
 - `report.md`, `patch.diff`, `logs.txt` — aggregated artifacts
 
 ## Configuration (.env)
@@ -233,8 +235,8 @@ LOG_JSON=0
 
 ### Running Tests
 ```bash
-pytest tests/ -v              # Verbose output
-pytest tests/test_file_queue.py::FileQueueTests::test_enqueue_rejects_duplicate_job_id  # Single test
+python3 -m unittest discover -s tests -v   # Verbose output
+python3 -m unittest tests.test_file_queue.FileQueueTests.test_enqueue_rejects_duplicate_job_id  # Single test
 ```
 
 ### Adding New Tests
@@ -244,9 +246,13 @@ pytest tests/test_file_queue.py::FileQueueTests::test_enqueue_rejects_duplicate_
 
 ## Adding a New Agent (worker)
 
+**CLI-based agents** (run external binaries): inherit `BaseWorker` → `AgentExecutor`.
+
+**LLM API agents** (no CLI): inherit `APIWorker` (`workers/api_worker.py`) and implement `call_api(prompt, context) -> str | APIResponse`. Artifact writing and error handling are provided by the base class.
+
 1. **Create file** `workers/my_agent.py`:
-   - Inherit `BaseWorker`
-   - Implement `run(ctx: StepContext) -> StepResult`
+   - Inherit `BaseWorker` (CLI) or `APIWorker` (direct API)
+   - Implement `run(ctx: StepContext) -> StepResult` or `call_api(prompt, context)`
    - Must write files: `report.md`, `patch.diff`, `logs.txt` to `ctx.step_dir`
 
 2. **Register** in `workers/registry.py`:
@@ -285,6 +291,6 @@ See `docs/SECURITY.md` for details.
 ## Before Committing
 
 - Check `git status` and remove unnecessary changes/junk files
-- Run relevant tests: `pytest tests/`
+- Run relevant tests: `python3 -m unittest discover -s tests`
 - Ensure code follows existing patterns in neighboring modules
 - Comments and commit messages — preferably in English, briefly and to the point

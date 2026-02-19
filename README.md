@@ -20,12 +20,15 @@ Multi-Agent CLI Orchestrator coordinates multiple AI coding agents in a sequenti
 
 ## Features
 
-- **Filesystem queue** — no Redis or RabbitMQ; queue is just file moves between `pending/running/done/failed/`
+- **Filesystem queue** — no Redis or RabbitMQ; queue is just file moves between `pending/running/done/failed/awaiting_approval/`
 - **Webhook API** — `POST /webhook` accepts jobs, validates against JSON Schema, enqueues
 - **Sequential pipeline** — default 3-step: `plan → implement → review`
 - **Fixed artifact layout** — every step writes `result.json`, `report.md`, `patch.diff`, `logs.txt` to a deterministic path
 - **Simulation mode by default** — safe to run without real CLI agents or API keys
 - **Real CLI mode** — set `ENABLE_REAL_CLI=1` to execute actual `opencode`/`codex`/`claude` commands
+- **Context between steps** — `context_window` / `context_strategy` passed across steps; persisted to `artifacts/<job_id>/context.json`
+- **Human-in-the-loop** — `on_failure: ask_human` pauses job → `needs_human` status → `awaiting_approval/` queue
+- **LLM API workers** — `APIWorker` base class for direct API integrations (no CLI needed)
 - **Workspace isolation** — each job runs in its own `workspaces/<job_id>/work/`
 - **Security layers** — env allowlist, binary allowlist, sandbox wrapper, path traversal checks, log redaction
 - **Prometheus metrics** — exposed at `GET /metrics`
@@ -51,10 +54,11 @@ No message broker — queue is atomic file moves:
 
 ```
 var/queue/
-├── pending/          ← new jobs land here
-├── running/          ← claimed by runner (atomic rename)
-├── done/             ← completed jobs
-└── failed/           ← failed jobs
+├── pending/             ← new jobs land here
+├── running/             ← claimed by runner (atomic rename)
+├── done/                ← completed jobs
+├── failed/              ← failed jobs
+└── awaiting_approval/   ← paused jobs (on_failure: ask_human)
 ```
 
 `reclaim_stale_running()` returns orphaned jobs (>600s in running) back to pending.
@@ -66,6 +70,7 @@ artifacts/<job_id>/
 ├── job.json          ← normalized JobSpec (input contract)
 ├── state.json        ← current step statuses / attempt counts
 ├── result.json       ← aggregated job result
+├── context.json      ← conversation context window (updated after each step)
 ├── report.md
 ├── patch.diff
 ├── logs.txt
@@ -235,9 +240,8 @@ See [`docs/ADD_AGENT.md`](docs/ADD_AGENT.md) for a step-by-step guide.
 ## Running Tests
 
 ```bash
-pytest tests/                            # All tests
-pytest tests/test_file_queue.py          # Single module
-pytest tests/ -v                         # Verbose
+python3 -m unittest discover -s tests    # All tests
+python3 -m unittest tests.test_file_queue  # Single module
 ```
 
 ---

@@ -19,8 +19,8 @@ make runner       # Job runner (polls queue)
 make scheduler    # Cron scheduler
 
 # Tests
-pytest tests/                          # All tests
-pytest tests/test_file_queue.py        # Single module
+python3 -m unittest discover -s tests  # All tests (pytest not installed)
+python3 -m unittest tests.test_file_queue  # Single module
 
 # Submit jobs
 make submit-example                    # CLI submit
@@ -44,7 +44,7 @@ The runner processes one job at a time from the filesystem queue. Each step writ
 
 No message broker — queue is file moves between directories:
 ```
-var/queue/pending/ → running/ → done/ | failed/
+var/queue/pending/ → running/ → done/ | failed/ | awaiting_approval/
 ```
 `claim()` uses atomic rename. `reclaim_stale_running()` returns orphaned jobs (>600s in running) to pending.
 
@@ -55,13 +55,14 @@ All agents inherit `BaseWorker` → `AgentExecutor`. Two execution modes:
 - **Real CLI** (`ENABLE_REAL_CLI=1`): Executes actual `opencode`/`codex`/`claude` commands. Requires preflight version checks (`orchestrator/preflight.py`).
 
 Add new agents: create `workers/my_agent.py` extending `BaseWorker`, register in `workers/registry.py`. See `docs/ADD_AGENT.md`.
+For LLM API workers (no CLI): extend `APIWorker` (`workers/api_worker.py`) and implement `call_api(prompt, context)`.
 
 ### Artifact Store (`orchestrator/artifact_store.py`)
 
 All writes are atomic (write to `.tmp` then rename). Path traversal is checked — paths must stay within `artifacts/<job_id>/`. The `artifacts/` layout is fixed:
 ```
 artifacts/<job_id>/
-├── job.json, state.json, result.json, report.md, patch.diff, logs.txt
+├── job.json, state.json, result.json, report.md, patch.diff, logs.txt, context.json
 └── steps/<step_id>/result.json, report.md, patch.diff, logs.txt, raw_stdout.txt
 ```
 
@@ -91,6 +92,8 @@ FastAPI endpoints:
 ### Data Models (`orchestrator/models.py`)
 
 `JobSpec` → contains list of `StepSpec` → runner produces `StepResult` per step → aggregated into `JobResult`. All validated with Pydantic v2. JSON schemas in `contracts/` are used for webhook input validation.
+- `JobSpec.context_window` / `context_strategy` — conversation history shared across steps; persisted to `artifacts/<job_id>/context.json` after each step.
+- `StepSpec.on_failure` — supports `stop` | `continue` | `ask_human` | `goto:<step_id>`. `ask_human` → status `needs_human` → job moves to `awaiting_approval/` queue.
 
 ## Key Design Decisions
 
