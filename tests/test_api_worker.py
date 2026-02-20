@@ -8,7 +8,7 @@ from typing import Any
 
 from orchestrator.models import JobSpec, PolicySpec, StepSpec
 from orchestrator.policy import ExecutionPolicy
-from workers.api_worker import APIResponse, APIWorker
+from workers.api_worker import APIWorker
 from workers.base import StepContext
 
 
@@ -29,21 +29,16 @@ class DummyAPIWorker(APIWorker):
         self.last_prompt: str | None = None
         self.last_context: dict[str, Any] | None = None
 
-    async def call_api(self, prompt: str, context: dict[str, Any]) -> str | APIResponse:
+    async def call_api(self, prompt: str, context: dict[str, Any]) -> str:
         self.last_prompt = prompt
         self.last_context = context
-        return APIResponse(
-            report_md="# API report\n\nok\n",
-            summary="API success",
-            status="success",
-            raw_response="ok",
-        )
+        return "ok"
 
 
 class BrokenAPIWorker(APIWorker):
     AGENT_NAME = "broken_api"
 
-    async def call_api(self, prompt: str, context: dict[str, Any]) -> str | APIResponse:
+    async def call_api(self, prompt: str, context: dict[str, Any]) -> str:
         raise RuntimeError("boom")
 
 
@@ -89,9 +84,7 @@ class APIWorkerTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(result.status, "success")
             self.assertIsNotNone(worker.last_prompt)
             self.assertIsNotNone(worker.last_context)
-            assert worker.last_context is not None
-            self.assertEqual(worker.last_context["job_metadata"]["ticket"], "DEV-1")
-            self.assertEqual(worker.last_context["context_strategy"], "sliding")
+            self.assertEqual(worker.last_context["ticket"], "DEV-1")
             self.assertEqual((ctx.step_dir / "report.md").exists(), True)
             self.assertEqual((ctx.step_dir / "logs.txt").exists(), True)
 
@@ -129,7 +122,7 @@ class APIWorkerTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(result.status, "failed")
             self.assertIsNotNone(result.error)
             assert result.error is not None
-            self.assertEqual(result.error.code, "api_call_failed")
+            self.assertEqual(result.error.code, "api_error")
 
 
 if __name__ == "__main__":

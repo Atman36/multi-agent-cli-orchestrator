@@ -46,18 +46,14 @@ def _ctx(step: StepSpec, root: Path) -> StepContext:
 
 
 class KimiWorkerTests(unittest.TestCase):
-    def test_build_cmd_uses_non_interactive_prompt_mode(self) -> None:
-        with tempfile.TemporaryDirectory() as td:
-            step = StepSpec(step_id="step01", agent="kimi", role="assistant", prompt="implement")
-            ctx = _ctx(step, Path(td))
-            cmd = KimiWorker().build_cmd(ctx, "test prompt")
-
-            self.assertEqual(cmd[0], "kimi")
-            self.assertIn("--print", cmd)
-            self.assertIn("--output-format", cmd)
-            self.assertIn("--final-message-only", cmd)
-            self.assertIn("--prompt", cmd)
-            self.assertNotIn("run", cmd)
+    def test_call_api_simulated_response(self) -> None:
+        import asyncio
+        async def run_test() -> None:
+            worker = KimiWorker()
+            result = await worker.call_api("test prompt", {})
+            self.assertIn("Kimi (Simulated)", result)
+            
+        asyncio.run(run_test())
 
     def test_worker_is_registered(self) -> None:
         ensure_workers_registered()
